@@ -117,8 +117,10 @@ Can you still make it? Tap below so the organizers know.`,
     }
     case 'organizer_alert':
       return simple(`🛠️ Organizer notice for ${title || 'your tournament'}: ${escapeDiscord(String(p.text ?? ''))}${t ? ` ${link(ctx, `/t/${t.id}/manage`)}` : ''}`);
-    case 'personal':
-      return simple(`${String(p.text ?? '')}${t ? `\n${tLink}` : ''}`);
+    case 'personal': {
+      const text = `${String(p.text ?? '')}${t ? `\n${tLink}` : ''}`;
+      return { ...simple(text), dmButtons: Array.isArray(p.buttons) ? (p.buttons as MessageButton[]) : undefined };
+    }
     default:
       return t ? simple(`${title}: ${STATE_LABELS[t.state]}`) : null;
   }

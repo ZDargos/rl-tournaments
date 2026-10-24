@@ -204,6 +204,12 @@ export const configSchema = z.object({
     .object({
       /** Discord channel id; null = server default announcement channel. */
       announcementChannelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      /** Channel for registration open/closed posts and the start time vote; null = the announcement channel. */
+      registrationChannelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      /** Delete everything the bot posted for this tournament in those channels once it is completed or cancelled. */
+      clearChannelsOnEnd: z.boolean().default(true),
+      /** Hours after the end before the channels are cleared (0 = right away). */
+      clearChannelsAfterHours: z.number().min(0).max(720).default(0),
       channelAnnouncements: z.boolean().default(true),
       dms: z.boolean().default(true),
       categories: z

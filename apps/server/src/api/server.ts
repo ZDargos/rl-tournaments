@@ -7,6 +7,7 @@ import type { AppContext } from '../services/context.js';
 import { oauthConfigured } from '../env.js';
 import { authorizeUrl, handleCallback, OAUTH_SCOPES, type FetchLike } from '../auth/oauth.js';
 import { sendAvailabilityCheck, setAvailability } from '../services/availability.js';
+import { cancelPoll, closePollNow, createPoll, setPollVotes } from '../services/polls.js';
 import { createSession, destroySession, redeemLoginCode, resolveSession } from '../auth/sessions.js';
 import type { UserRow } from '../services/users.js';
 import { ensureUser, listMutes, publicUser, setMute, setPreferences, upsertUser } from '../services/users.js';
@@ -354,6 +355,20 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     const b = z.object({ answer: z.enum(['confirmed', 'declined']), userId: z.string().regex(/^\d{5,25}$/).nullish() }).parse(req.body);
     const answer = await setAvailability(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.userId ?? null, b.answer, src);
     return { answer };
+  });
+  app.post('/api/tournaments/:id/start-poll', async (req) => {
+    const b = z.object({ options: z.array(z.string()).min(2).max(10), closesAt: z.string() }).parse(req.body);
+    return createPoll(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b, src);
+  });
+  app.post('/api/tournaments/:id/start-poll/close', async (req) => closePollNow(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), src));
+  app.delete('/api/tournaments/:id/start-poll', async (req) => {
+    await cancelPoll(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), src);
+    return { ok: true };
+  });
+  app.post('/api/tournaments/:id/start-poll/vote', async (req) => {
+    const b = z.object({ options: z.array(z.number().int().min(0).max(9)).max(10) }).parse(req.body);
+    const r = await setPollVotes(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.options, src);
+    return { picks: r.picks };
   });
   app.post('/api/tournaments/:id/availability-check', async (req) => {
     const b = z.object({ userId: snowflake.nullish() }).parse(req.body ?? {});

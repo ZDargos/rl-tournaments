@@ -165,9 +165,11 @@ export async function applyPreset(ctx: AppContext, actorId: string, id: number, 
 }
 
 /** Validated lifecycle transition. `actorId` null = system (scheduler). */
-export async function transition(ctx: AppContext, actorId: string | null, id: number, action: TransitionAction, opts: { reason?: string; source?: Source } = {}) {
+export async function transition(ctx: AppContext, actorId: string | null, id: number, action: TransitionAction, opts: { reason?: string; source?: Source; fromPoll?: boolean } = {}) {
   const t = loadTournament(ctx, id);
   if (actorId) await assertManage(ctx, t, actorId);
+  if (action === 'open_registration' && !opts.fromPoll && ctx.db.prepare("SELECT 1 FROM start_polls WHERE tournament_id = ? AND status = 'open'").get(id))
+    throw conflict('start_poll_open', 'Players are still voting on the start time. Registration opens when the vote closes (or close the vote now).');
   if (action === 'start') return startTournament(ctx, actorId, id, { source: opts.source ?? 'web' });
   if (action === 'complete') throw invalid('not_allowed', 'Tournaments complete automatically when the champion is decided.');
   const to = nextState(t.state, action);
@@ -190,6 +192,7 @@ export async function transition(ctx: AppContext, actorId: string | null, id: nu
     if (action === 'pause') enqueue(ctx, { tournamentId: id, category: 'tournament_start', key: `t${id}:pause:${now}`, audience: 'participants', payload: { event: 'paused' } });
     if (action === 'resume') enqueue(ctx, { tournamentId: id, category: 'tournament_start', key: `t${id}:resume:${now}`, audience: 'participants', payload: { event: 'resumed' } });
     if (action === 'cancel') {
+      ctx.db.prepare("UPDATE start_polls SET status = 'cancelled', closed_at = ?, closed_by = ?, updated_at = ? WHERE tournament_id = ? AND status = 'open'").run(now, actorId, now, id);
       cancelOpenMatches(ctx, id);
       cancelPending(ctx, { tournamentId: id });
       ctx.db.prepare("UPDATE invitations SET status = 'revoked' WHERE tournament_id = ? AND status = 'pending'").run(id);

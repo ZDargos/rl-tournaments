@@ -79,6 +79,9 @@ export const HELP = {
 
   // Notifications
   announcementChannel: 'Text channel for tournament announcements (registration, start, results, standings). Empty: the server’s default channel. Private tournaments only post in a channel you pick here.',
+  registrationChannel: 'Text channel for the registration open and closed posts and the start time vote. Everything else stays in the announcement channel. Empty: the announcement channel.',
+  clearChannelsOnEnd: 'When the tournament is completed or cancelled, the bot deletes everything it posted for this tournament in the announcement and registration channels, so they are clean for the next one. It only deletes its own messages.',
+  clearChannelsAfterHours: 'How long to wait after the tournament ends before clearing the channels, for example 24 to leave the final results up for a day. 0 = right away.',
   startReminderHours:
     'Hours before the start to remind every player, separated by commas (0.5 = 30 minutes). The DM asks “Can you still make it?” with two buttons. Anyone who has not answered a day after being asked is marked as maybe (orange) and organizers get a DM, so make the first reminder at least 48 hours before the start. Players with DMs off are never asked.',
   checkInReminders: 'Minutes before check-in closes to remind players who have not checked in yet, separated by commas.',

@@ -140,8 +140,13 @@ async function main() {
   }
   await org.getByRole('button', { name: 'Start tournament' }).click();
   await org.getByRole('button', { name: 'Confirm', exact: true }).click();
-  await org.getByText('In progress').first().waitFor();
-  check(true, 'tournament in progress');
+  // Wait for the state itself: "In progress" also appears in the lifecycle help text.
+  let started = null;
+  for (let i = 0; i < 60 && started !== 'in_progress'; i++) {
+    started = (await apiAs(org, `/api/tournaments/${tid}`)).tournament.state;
+    if (started !== 'in_progress') await new Promise((r) => setTimeout(r, 250));
+  }
+  check(started === 'in_progress', `tournament in progress (state: ${started})`);
 
   step('players report and confirm every match');
   const byUser = new Map(players.map((p, i) => [`10000000000000000${i + 1}`, p]));

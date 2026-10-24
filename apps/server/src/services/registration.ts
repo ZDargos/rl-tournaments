@@ -81,7 +81,7 @@ function uniqueError(err: unknown): string | null {
   return null;
 }
 
-async function assertEligible(ctx: AppContext, t: LoadedTournament, userId: string) {
+export async function assertEligible(ctx: AppContext, t: LoadedTournament, userId: string) {
   const m = await memberFacts(ctx, t.guild_id, userId);
   if (!m.isMember) throw forbidden('You must be a member of the tournament’s Discord server to register.');
   const roles = t.cfg.registration.requiredRoleIds;
