@@ -209,6 +209,20 @@ export function validateFinalsTeams(teams: { players: string[] }[], expectedPlay
   return problems;
 }
 
+/** The finals "option" for teams the organizer picked by hand (any group-stage players, 3 per team). */
+export function handPickedOption(teams: { players: string[] }[], qualifiedIds: string[]): FinalsOption {
+  const players = teams.flatMap((t) => t.players);
+  const picked = new Set(players);
+  const d = describe(teams.length);
+  const added = players.filter((p) => !qualifiedIds.includes(p));
+  const removed = qualifiedIds.filter((p) => !picked.has(p));
+  const bye = d.byes ? ` ${d.byes} team(s) get a first-round bye.` : '';
+  return {
+    id: 'hand_picked', label: 'Hand-picked teams', players, added, removed, teams: teams.length, ...d,
+    description: `The organizer chose the ${teams.length} teams. Seeds follow the team order.${bye}`,
+  };
+}
+
 export function buildFinalsBracket(teamKeysInSeedOrder: string[]): BracketMatch[] {
   return buildSingleElimination(teamKeysInSeedOrder, { bracket: 'finals' });
 }

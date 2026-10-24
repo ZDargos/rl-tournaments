@@ -406,7 +406,10 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
   app.post('/api/tournaments/:id/sixmans/schedule/confirm', async (req) => confirmSchedule(ctx, requireUser(req).id, tid(req), src));
   app.post('/api/tournaments/:id/sixmans/finals/preview', async (req) =>
     previewFinals(ctx, requireUser(req).id, tid(req), z.object({ optionId: z.string().max(30).nullish(), qualifiersPerPool: z.number().int().min(1).max(64).nullish() }).parse(req.body ?? {}), src));
-  app.put('/api/tournaments/:id/sixmans/finals/teams', async (req) => editFinalsTeams(ctx, requireUser(req).id, tid(req), z.object({ teams: z.array(z.object({ players: z.array(snowflake) })).min(2).max(64) }).parse(req.body).teams, src));
+  app.put('/api/tournaments/:id/sixmans/finals/teams', async (req) => {
+    const body = z.object({ teams: z.array(z.object({ players: z.array(snowflake) })).min(2).max(64), handPicked: z.boolean().optional() }).parse(req.body);
+    return editFinalsTeams(ctx, requireUser(req).id, tid(req), body.teams, src, { handPicked: body.handPicked });
+  });
   app.post('/api/tournaments/:id/sixmans/finals/start', async (req) => {
     await startFinals(ctx, requireUser(req).id, tid(req), src);
     return { ok: true };

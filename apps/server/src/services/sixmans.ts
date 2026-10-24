@@ -1,6 +1,6 @@
 import {
   buildFinalsBracket, computeSixmansStandings, computeSkills, conflict, crossPoolOrder, defaultQualifiersPerPool, finalsOptions, formFinalsTeams, invalid,
-  isPreStart, makePools, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
+  handPickedOption, isPreStart, makePools, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
   type FinalsOption, type FinalsTeam, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
 } from '@rl/core';
 import type { AppContext, Source } from './context.js';
@@ -371,12 +371,24 @@ export async function previewFinals(ctx: AppContext, actorId: string, id: number
   });
 }
 
-/** Organizer moves players between finals teams and/or reorders team seeds. */
-export async function editFinalsTeams(ctx: AppContext, actorId: string, id: number, teams: { players: string[] }[], source: Source) {
+/**
+ * Organizer moves players between finals teams and/or reorders team seeds. With `handPicked` the
+ * organizer builds the teams from scratch out of any group-stage players (qualified or not), as
+ * many teams of three as they like; seeds follow the given order.
+ */
+export async function editFinalsTeams(ctx: AppContext, actorId: string, id: number, teams: { players: string[] }[], source: Source, opts: { handPicked?: boolean } = {}) {
   const t = await finalsManager(ctx, actorId, id);
   const plan = currentPlan(ctx, t.id, 'finals');
   if (!plan) throw notFound('Finals proposal');
   const data = JSON.parse(plan.data) as FinalsPlanData;
+  if (opts.handPicked) {
+    const groupPlayers = new Set([...data.qualified, ...data.others].map((q) => q.playerId));
+    const outsiders = teams.flatMap((tm) => tm.players).filter((u) => !groupPlayers.has(u));
+    if (outsiders.length) throw invalid('invalid_teams', `Only players from the group stage can play in the finals (${outsiders.length} other player(s) chosen).`);
+    const custom = handPickedOption(teams, data.qualified.map((q) => q.playerId));
+    data.options = [...data.options.filter((o) => o.id !== custom.id), custom];
+    data.optionId = custom.id;
+  }
   const option = data.options.find((o) => o.id === data.optionId)!;
   const problems = validateFinalsTeams(teams, option.players);
   if (problems.length) throw invalid('invalid_teams', problems.join(' '), { problems });
@@ -386,7 +398,7 @@ export async function editFinalsTeams(ctx: AppContext, actorId: string, id: numb
   data.bracket = bracketPreview(data.teams);
   tx(ctx, () => {
     savePlan(ctx, t, 'finals', 'proposed', data, plan.fingerprint, actorId);
-    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_teams_edited', details: { teams: teams.map((x) => x.players), source } });
+    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_teams_edited', details: { teams: teams.map((x) => x.players), handPicked: !!opts.handPicked, source } });
   });
   return data;
 }

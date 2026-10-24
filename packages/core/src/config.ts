@@ -227,6 +227,23 @@ export const configSchema = z.object({
       /** Let all tournament participants see (not join) team channels. */
       visibleToParticipants: z.boolean().default(false),
       deleteOnComplete: z.boolean().default(true),
+      /**
+       * Voice channel players are moved into when their match ends (between-games lobby). After
+       * `lobbySeconds` the bot opens their next match's channels and moves them in. null = off.
+       */
+      lobbyChannelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      lobbySeconds: z.number().int().min(1).max(3600).default(30),
+    })
+    .prefault({}),
+  /** Score reporting from Discord: a vote card per live match, posted in a channel. */
+  scoreReports: z
+    .object({
+      /** Text channel for vote cards; null = off. */
+      channelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      /** Matching votes needed before the result counts. */
+      votesNeeded: z.number().int().min(1).max(6).default(2),
+      /** The votes must include at least one player from each team (so one team cannot report its own win alone). */
+      requireBothTeams: z.boolean().default(true),
     })
     .prefault({}),
 });

@@ -28,6 +28,16 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
   const six = cfg.format === 'sixmans';
   const textChannels = channels.filter((c) => c.type === 'text');
   const categories = channels.filter((c) => c.type === 'category');
+  const voiceChannels = channels.filter((c) => c.type === 'voice');
+  const channelPicker = (value: string | null, list: typeof channels, onPick: (v: string | null) => void, emptyLabel: string, prefix = '#') =>
+    list.length ? (
+      <select value={value ?? ''} onChange={(e) => onPick(e.target.value || null)}>
+        <option value="">{emptyLabel}</option>
+        {list.map((ch) => <option key={ch.id} value={ch.id}>{prefix}{ch.name}</option>)}
+      </select>
+    ) : (
+      <input value={value ?? ''} placeholder="Channel id, e.g. 123456789012345678" onChange={(e) => onPick(e.target.value.trim() || null)} />
+    );
   return (
     <div className="stack">
       {locked && <div className="alert info">The tournament has started: format, registration and structure settings are locked. Notifications, voice and display settings can still change.</div>}
@@ -101,6 +111,9 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
           <h3>6mans</h3>
           <div className="form-grid">
             <Field label="Pools"><input type="number" min={1} max={32} value={cfg.sixmans.poolCount} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.poolCount = num(e.target.value, 1)!))} /></Field>
+            <Field label="Pool shuffle range" hint="Make pools may swap players this close in skill (4 = one rank, 1 = one division). 0 = only identical ranks.">
+              <input type="number" min={0} max={20} step={1} value={cfg.sixmans.poolShuffleTolerance} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.poolShuffleTolerance = num(e.target.value, 0)!))} />
+            </Field>
             <Field label="Rounds per pool" hint="One 3v3 match per round per pool by default."><input type="number" min={1} max={60} value={cfg.sixmans.roundsPerPool} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.roundsPerPool = num(e.target.value, 1)!))} /></Field>
             <Field label="Matches per round per pool"><input type="number" min={1} max={5} value={cfg.sixmans.matchesPerRound} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.matchesPerRound = num(e.target.value, 1)!))} /></Field>
             <Field label="Skill input">
@@ -220,6 +233,21 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             </div>
           </section>
           <section>
+            <h3>Score reporting in Discord</h3>
+            <p className="small muted">Each live match gets a card in this channel. The players tap the team that won; once enough matching votes are in, the result is recorded and the next match starts.</p>
+            <div className="form-grid">
+              <Field label="Score report channel" hint="Empty = off">
+                {channelPicker(cfg.scoreReports.channelId, textChannels, (v) => set((c) => void (c.scoreReports.channelId = v)), 'Off')}
+              </Field>
+              <Field label="Votes needed">
+                <input type="number" min={1} max={6} value={cfg.scoreReports.votesNeeded} onChange={(e) => set((c) => void (c.scoreReports.votesNeeded = num(e.target.value, 2)!))} />
+              </Field>
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <Check label="Votes must include a player from each team" checked={cfg.scoreReports.requireBothTeams} onChange={(v) => set((c) => void (c.scoreReports.requireBothTeams = v))} />
+            </div>
+          </section>
+          <section>
             <h3>Notifications</h3>
             <div className="form-grid">
               <Field label="Announcement channel" hint={textChannels.length ? 'Empty = the server default' : 'Channel id (the bot lists channels when it is in the server)'}>
@@ -267,6 +295,14 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               <Check label={cfg.teamSize === 1 ? 'Private voice channel per player' : 'Private voice channel per team'} checked={cfg.voice.enabled} onChange={(v) => set((c) => void (c.voice.enabled = v))} />
               <Check label="Move connected players automatically" checked={cfg.voice.moveConnectedPlayers} onChange={(v) => set((c) => void (c.voice.moveConnectedPlayers = v))} />
               <Check label="Delete when the match completes" checked={cfg.voice.deleteOnComplete} onChange={(v) => set((c) => void (c.voice.deleteOnComplete = v))} />
+            </div>
+            <div className="form-grid" style={{ marginTop: 10 }}>
+              <Field label="Between-games lobby" hint="Players wait here after each game, then get moved to their next match. Empty = off.">
+                {channelPicker(cfg.voice.lobbyChannelId, voiceChannels, (v) => set((c) => void (c.voice.lobbyChannelId = v)), 'Off', '🔊 ')}
+              </Field>
+              <Field label="Lobby time (seconds)">
+                <input type="number" min={1} max={3600} value={cfg.voice.lobbySeconds} onChange={(e) => set((c) => void (c.voice.lobbySeconds = Math.max(1, num(e.target.value, 30)!)))} />
+              </Field>
             </div>
             {categories.length > 0 && (
               <div className="form-grid" style={{ marginTop: 10 }}>

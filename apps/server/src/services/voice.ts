@@ -19,6 +19,11 @@ import { audit } from './audit.js';
  * so it is safe after restarts and retries. Only channels recorded in voice_channels are ever deleted.
  * A row is written ('creating') *before* the Discord call; the partial unique index on live rows
  * prevents duplicate channels, and a crashed 'creating' row is adopted by its exact name on recovery.
+ *
+ * Between-games lobby (voice.lobbyChannelId): when a match ends, players still in its channels are
+ * moved to the lobby before the channels are deleted. A match whose players finished a game less
+ * than voice.lobbySeconds ago is held: its channels are created (and players moved in) only when
+ * the timer runs out.
  */
 
 interface VoiceRow {
@@ -120,6 +125,49 @@ async function createFor(ctx: AppContext, t: LoadedTournament, m: MatchRow, slot
   }
 }
 
+/** Move players who are still in a finished match's channel into the lobby (before it is deleted). */
+async function moveToLobby(ctx: AppContext, t: LoadedTournament, row: VoiceRow) {
+  const lobby = t.cfg.voice.lobbyChannelId;
+  if (!lobby || !row.channel_id || !t.cfg.voice.moveConnectedPlayers) return;
+  for (const u of json<string[]>(row.member_ids, [])) {
+    try {
+      if ((await ctx.discord.getMemberVoiceChannel(t.guild_id, u)) === row.channel_id) await ctx.discord.moveMember(t.guild_id, u, lobby);
+    } catch (err) {
+      ctx.log.info({ err: String(err), user: u, match: row.match_id }, 'could not move player into the lobby');
+    }
+  }
+}
+
+/** When the lobby timer for a match's players runs out (ms epoch), or null when it is not held. */
+export function lobbyHoldUntil(ctx: AppContext, t: LoadedTournament, m: MatchRow): number | null {
+  if (!t.cfg.voice.lobbyChannelId) return null;
+  const row = ctx.db
+    .prepare(
+      `SELECT MAX(x.completed_at) AS last FROM matches x JOIN competitor_members cm ON cm.competitor_id IN (x.competitor_a, x.competitor_b)
+       WHERE x.tournament_id = ? AND x.id <> ? AND x.status = 'completed' AND x.walkover = 0 AND x.completed_at IS NOT NULL
+         AND cm.user_id IN (SELECT user_id FROM competitor_members WHERE competitor_id IN (?, ?))`,
+    )
+    .get(t.id, m.id, m.competitor_a, m.competitor_b) as { last: string | null };
+  if (!row.last) return null;
+  const until = Date.parse(row.last) + t.cfg.voice.lobbySeconds * 1000;
+  return until > ctx.clock.now().getTime() ? until : null;
+}
+
+const lobbyWakeups = new Map<number, { at: number; timer: NodeJS.Timeout }>();
+
+/** Re-run reconciliation when the earliest held match's lobby timer ends (the job loop is a fallback). */
+function wakeAt(ctx: AppContext, tournamentId: number, at: number) {
+  const existing = lobbyWakeups.get(tournamentId);
+  if (existing && existing.at <= at) return;
+  if (existing) clearTimeout(existing.timer);
+  const timer = setTimeout(() => {
+    lobbyWakeups.delete(tournamentId);
+    ctx.kick(tournamentId);
+  }, Math.max(0, at - ctx.clock.now().getTime()) + 50);
+  timer.unref?.();
+  lobbyWakeups.set(tournamentId, { at, timer });
+}
+
 export async function reconcileTournament(ctx: AppContext, tournamentId: number, opts: { verifyExisting?: boolean; force?: boolean } = {}) {
   if (!ctx.discord.enabled) return;
   let t: LoadedTournament;
@@ -142,8 +190,19 @@ export async function reconcileTournament(ctx: AppContext, tournamentId: number,
     const desired = running && voiceOn && ACTIVE.has(m.status) && m.competitor_a && m.competitor_b;
     const rows = byMatch.get(m.id) ?? [];
     if (!desired) {
-      if (!(t.state === 'paused' && ACTIVE.has(m.status))) for (const r of rows) await deleteRow(ctx, r);
+      if (!(t.state === 'paused' && ACTIVE.has(m.status)))
+        for (const r of rows) {
+          if (r.status === 'active') await moveToLobby(ctx, t, r);
+          await deleteRow(ctx, r);
+        }
       continue;
+    }
+    if (!rows.length) {
+      const hold = lobbyHoldUntil(ctx, t, m);
+      if (hold) {
+        wakeAt(ctx, t.id, hold);
+        continue;
+      }
     }
     for (const slot of ['a', 'b'] as const) {
       const members = competitorMembers(ctx, slot === 'a' ? m.competitor_a : m.competitor_b).sort();
@@ -171,6 +230,19 @@ export async function reconcileTournament(ctx: AppContext, tournamentId: number,
       if (!opts.force && lastFailed?.status === 'failed' && ctx.clock.now().getTime() - Date.parse(lastFailed.updated_at) < FAILED_RETRY_MS) continue;
       const gen = (lastFailed?.generation ?? 0) + 1;
       await createFor(ctx, t, m, slot, members, gen);
+    }
+  }
+}
+
+/** Every job tick: tournaments with a lobby, so held matches open on time even without other changes. */
+export async function reconcileLobbies(ctx: AppContext) {
+  const rows = ctx.db.prepare("SELECT id, config FROM tournaments WHERE state = 'in_progress'").all() as { id: number; config: string }[];
+  for (const r of rows) {
+    if (!json<{ voice?: { lobbyChannelId?: string | null } }>(r.config, {}).voice?.lobbyChannelId) continue;
+    try {
+      await reconcileTournament(ctx, r.id);
+    } catch (err) {
+      ctx.log.error({ err: String(err), tournamentId: r.id }, 'voice reconcile failed');
     }
   }
 }

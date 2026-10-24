@@ -11,10 +11,18 @@ export interface DiscordMemberInfo {
   isAdmin: boolean;
 }
 
+export interface MessageButton {
+  customId: string;
+  label: string;
+  style: 'primary' | 'secondary' | 'success' | 'danger';
+}
+
 export interface MessageContent {
   content: string;
   /** User ids that may be pinged. Everyone else (including @everyone) is suppressed. */
   mentionUserIds?: string[];
+  /** One row of buttons (max 5). An edit with no buttons removes them. */
+  buttons?: MessageButton[];
 }
 
 export interface CreateVoiceChannelInput {
@@ -69,6 +77,7 @@ export interface DiscordPort {
   getMemberVoiceChannel(guildId: string, userId: string): Promise<string | null>;
   moveMember(guildId: string, userId: string, channelId: string): Promise<void>;
   sendChannelMessage(channelId: string, message: MessageContent): Promise<{ id: string }>;
+  editChannelMessage(channelId: string, messageId: string, message: MessageContent): Promise<void>;
   sendDM(userId: string, message: MessageContent): Promise<{ id: string }>;
   botPermissions(guildId: string): Promise<BotPermissionReport>;
 }
@@ -79,7 +88,11 @@ export class FakeDiscord implements DiscordPort {
   members = new Map<string, DiscordMemberInfo>(); // `${guild}:${user}`
   channels = new Map<string, { id: string; guildId: string; name: string; type: 'text' | 'voice' | 'category'; parentId: string | null; memberIds: string[]; organizerIds: string[]; viewerIds: string[] }>();
   voiceStates = new Map<string, string>(); // `${guild}:${user}` -> channel
-  sent: { kind: 'channel' | 'dm'; target: string; content: string; mentions: string[] }[] = [];
+  sent: { kind: 'channel' | 'dm'; target: string; content: string; mentions: string[]; id?: string; buttons?: MessageButton[] }[] = [];
+  /** Current content of channel messages by id (sends and edits). */
+  messages = new Map<string, { channelId: string; content: string; buttons: MessageButton[] }>();
+  edits: { channelId: string; messageId: string; content: string; buttons: MessageButton[] }[] = [];
+  failSend: DiscordApiError | null = null;
   dmClosed = new Set<string>();
   failCreateVoice: DiscordApiError | null = null;
   permissions: BotPermissionReport = { manageChannels: true, moveMembers: true, viewChannel: true, sendMessages: true, connect: true, missing: [] };
@@ -134,8 +147,17 @@ export class FakeDiscord implements DiscordPort {
     this.voiceStates.set(`${guildId}:${userId}`, channelId);
   }
   async sendChannelMessage(channelId: string, message: MessageContent) {
-    this.sent.push({ kind: 'channel', target: channelId, content: message.content, mentions: message.mentionUserIds ?? [] });
-    return { id: this.nextId() };
+    if (this.failSend) throw this.failSend;
+    const id = this.nextId();
+    this.sent.push({ kind: 'channel', target: channelId, content: message.content, mentions: message.mentionUserIds ?? [], id, buttons: message.buttons ?? [] });
+    this.messages.set(id, { channelId, content: message.content, buttons: message.buttons ?? [] });
+    return { id };
+  }
+  async editChannelMessage(channelId: string, messageId: string, message: MessageContent) {
+    const m = this.messages.get(messageId);
+    if (!m || m.channelId !== channelId) throw new DiscordApiError('Unknown Message', 10008, 404, true);
+    this.messages.set(messageId, { channelId, content: message.content, buttons: message.buttons ?? [] });
+    this.edits.push({ channelId, messageId, content: message.content, buttons: message.buttons ?? [] });
   }
   async sendDM(userId: string, message: MessageContent) {
     if (this.dmClosed.has(userId)) throw new DiscordApiError('Cannot send messages to this user', DiscordCodes.CannotDM, 403, true);

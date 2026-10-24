@@ -47,6 +47,13 @@ export const COMMANDS = [
       sub('apply-preset', 'Preview and apply a preset before the start', [tournament(), preset()]),
       sub('export', 'Export CSV', [tournament(), { type: STRING, name: 'kind', description: 'What to export', required: true, choices: EXPORT_CHOICES }]),
       sub('link', 'Get the website link', [tournament()]),
+      sub('score-channel', 'Channel where players vote on match results', [
+        tournament(),
+        { type: CHANNEL, name: 'channel', description: 'Text channel for the vote cards', channel_types: [0, 5] },
+        { type: INTEGER, name: 'votes', description: 'Matching votes needed (default 2)', min_value: 1, max_value: 6 },
+        { type: BOOLEAN, name: 'both_teams', description: 'Votes must include a player from each team (default on)' },
+        { type: BOOLEAN, name: 'off', description: 'Turn vote cards off' },
+      ]),
     ],
   },
   {
@@ -119,6 +126,7 @@ export const COMMANDS = [
       sub('schedule', 'Generate the group-stage schedule (preview)', [tournament(), { type: INTEGER, name: 'rounds', description: 'Rounds per pool', required: true, min_value: 1, max_value: 60 }, { type: BOOLEAN, name: 'skill_balanced', description: 'Balance teams by skill' }]),
       sub('swap', 'Swap two players within a scheduled round', [tournament(), { type: INTEGER, name: 'pool', description: 'Pool number (1 = A)', required: true, min_value: 1 }, { type: INTEGER, name: 'round', description: 'Round', required: true, min_value: 1 }, user('player_a', 'First player'), user('player_b', 'Second player')]),
       sub('confirm-schedule', 'Confirm the schedule', [tournament()]),
+      sub('finals-teams', 'Hand-pick the finals teams (first team = top seed)', [tournament(), { type: STRING, name: 'teams', description: 'Mentions, 3 per team, teams split by | e.g. @a @b @c | @d @e @f', required: true, max_length: 1500 }]),
       sub('finals', 'Preview finals options and teams', [tournament(), { type: STRING, name: 'option', description: 'Finals structure option id (from the preview)', max_length: 30 }, { type: INTEGER, name: 'qualifiers', description: 'Qualifiers per pool', min_value: 1, max_value: 64 }]),
       sub('start-finals', 'Start the finals bracket', [tournament()]),
     ],
@@ -134,7 +142,16 @@ export const COMMANDS = [
   },
   {
     name: 'voice', description: 'Tournament voice channels', dm_permission: false,
-    options: [sub('repair', 'Recreate missing channels / clean up stale ones', [tournament()]), sub('status', 'Show match voice channels', [tournament()])],
+    options: [
+      sub('repair', 'Recreate missing channels / clean up stale ones', [tournament()]),
+      sub('status', 'Show match voice channels', [tournament()]),
+      sub('lobby', 'Voice channel players wait in between games', [
+        tournament(),
+        { type: CHANNEL, name: 'channel', description: 'Lobby voice channel', channel_types: [2] },
+        { type: INTEGER, name: 'seconds', description: 'Time in the lobby before the next match (default 30)', min_value: 1, max_value: 3600 },
+        { type: BOOLEAN, name: 'off', description: 'Turn the lobby off' },
+      ]),
+    ],
   },
   {
     name: 'server', description: 'Server-wide tournament settings', dm_permission: false,
@@ -158,5 +175,6 @@ export const SETTING_SUGGESTIONS = [
   'singleElim.thirdPlaceMatch', 'doubleElim.grandFinalReset', 'swiss.rounds', 'roundRobin.encounters', 'sixmans.poolCount', 'sixmans.skillMethod',
   'sixmans.roundsPerPool', 'sixmans.skillBalancedTeams', 'sixmans.groupBestOf', 'sixmans.finalsBestOf', 'sixmans.qualifiersPerPool', 'sixmans.qualifierAdjustment',
   'notifications.channelAnnouncements', 'notifications.dms', 'notifications.announcementChannelId', 'notifications.startReminders', 'notifications.matchReminders',
-  'voice.enabled', 'voice.moveConnectedPlayers', 'voice.visibleToParticipants', 'voice.categoryId', 'teamSize', 'registrationMode', 'format',
+  'scoreReports.channelId', 'scoreReports.votesNeeded', 'scoreReports.requireBothTeams', 'voice.lobbyChannelId', 'voice.lobbySeconds',
+  'sixmans.poolShuffleTolerance', 'voice.enabled', 'voice.moveConnectedPlayers', 'voice.visibleToParticipants', 'voice.categoryId', 'teamSize', 'registrationMode', 'format',
 ];

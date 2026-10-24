@@ -31,7 +31,7 @@ describe('6mans end to end', () => {
 
     const pools = ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools`, {})).body;
     expect(pools.pools.map((p: any) => p.players.length)).toEqual([8, 8]);
-    // Deterministic: regenerating gives the same pools.
+    // Every rank here is different and more than the shuffle range apart, so remaking gives the same pools.
     const again = ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools`, {})).body;
     expect(again.pools).toEqual(pools.pools);
     // Organizer edit: swap one player between pools.

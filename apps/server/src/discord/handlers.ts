@@ -7,8 +7,9 @@ import { addAdmin, applyPreset, createTournament, inviteViewer, previewPreset, r
 import {
   adminAddPlayer, adminEntryAction, checkIn, entryForUser, entryMembers, inviteToTeam, register, removeTeamMember, renameTeam, respondInvitation, setEntrySkill, setOwnRank, withdraw,
 } from '../services/registration.js';
-import { abandonMatch, adminResolve, confirmResult, disputeResult, reportResult } from '../services/results.js';
-import { confirmPools, confirmSchedule, generateSchedule, makePoolsProposal, previewFinals, startFinals, swapScheduledPlayers } from '../services/sixmans.js';
+import { abandonMatch, adminResolve, confirmResult, disputeResult, reportResult, voteResult } from '../services/results.js';
+import { getMatch } from '../services/queries.js';
+import { confirmPools, confirmSchedule, editFinalsTeams, generateSchedule, makePoolsProposal, previewFinals, startFinals, swapScheduledPlayers } from '../services/sixmans.js';
 import { createPreset, deletePreset, duplicatePreset, listPresets, presetDto, updatePreset, type PresetRow } from '../services/presets.js';
 import { listTournaments, matchDetail, tournamentDetail } from '../services/views.js';
 import { exportCsv, type ExportKind } from '../services/exports.js';
@@ -184,6 +185,21 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
       }
       await updateTournament(ctx, uid, t.id, { configPatch: patchFromPath(path, raw) }, src);
       return reply(`✅ \`${path}\` updated for **${esc(t.name)}**.`);
+    }
+    case 'tourney score-channel': {
+      const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
+      const patch: Record<string, unknown> = {};
+      if (optBool(i, 'off')) patch.channelId = null;
+      else if (typeof i.options.channel === 'string') patch.channelId = i.options.channel;
+      if (optNum(i, 'votes') != null) patch.votesNeeded = optNum(i, 'votes');
+      if (optBool(i, 'both_teams') != null) patch.requireBothTeams = optBool(i, 'both_teams');
+      const u = Object.keys(patch).length ? await updateTournament(ctx, uid, t.id, { configPatch: { scoreReports: patch } }, src) : t;
+      const sr = u.cfg.scoreReports;
+      return reply(
+        sr.channelId
+          ? `✅ Vote cards for live matches of **${esc(u.name)}** go to <#${sr.channelId}>. A result counts after ${sr.votesNeeded} matching vote(s)${sr.requireBothTeams && sr.votesNeeded > 1 ? ', with at least one from each team' : ''}.`
+          : `Vote cards are off for **${esc(u.name)}**. Turn them on with \`/tourney score-channel tournament:${u.id} channel:#channel\`.`,
+      );
     }
     case 'tourney admin-add':
     case 'tourney admin-remove': {
@@ -464,6 +480,13 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
       await confirmSchedule(ctx, uid, t.id, src);
       return reply(`✅ Schedule confirmed. Start the group stage with \`/tourney start tournament:${t.id}\` (or let it auto-start).`);
     }
+    case 'sixmans finals-teams': {
+      const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
+      const teams = optStr(i, 'teams')!.split('|').map((part) => ({ players: [...part.matchAll(/<@!?(\d{5,25})>/g)].map((x) => x[1]) })).filter((tm) => tm.players.length);
+      const d = await editFinalsTeams(ctx, uid, t.id, teams, src, { handPicked: true });
+      const names = await nameMap(ctx, d.teams.flatMap((x) => x.players));
+      return reply(`✅ Hand-picked finals teams saved:\n${d.teams.map((tm) => `**Seed ${tm.seed}**: ${tm.players.map((u) => esc(names.get(u) ?? u)).join(', ')}`).join('\n')}\nStart with \`/sixmans start-finals tournament:${t.id}\`.`);
+    }
     case 'sixmans finals': {
       const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
       const d = await previewFinals(ctx, uid, t.id, { optionId: optStr(i, 'option') ?? null, qualifiersPerPool: optNum(i, 'qualifiers') ?? null }, src);
@@ -500,6 +523,20 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
       const s = await repairVoice(ctx, uid, t.id);
       const failed = s.filter((x) => x.status === 'failed');
       return reply(`🔧 Voice channels reconciled: ${s.filter((x) => x.status === 'active').length} active${failed.length ? `, ${failed.length} failed (${esc(failed[0].error ?? '')})` : ''}.`);
+    }
+    case 'voice lobby': {
+      const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
+      const patch: Record<string, unknown> = {};
+      if (optBool(i, 'off')) patch.lobbyChannelId = null;
+      else if (typeof i.options.channel === 'string') patch.lobbyChannelId = i.options.channel;
+      if (optNum(i, 'seconds') != null) patch.lobbySeconds = optNum(i, 'seconds');
+      const u = Object.keys(patch).length ? await updateTournament(ctx, uid, t.id, { configPatch: { voice: patch } }, src) : t;
+      const v = u.cfg.voice;
+      return reply(
+        v.lobbyChannelId
+          ? `✅ After each game, players go to <#${v.lobbyChannelId}> for ${v.lobbySeconds} second(s), then into their next match's channels.`
+          : `The between-games lobby is off for **${esc(u.name)}**.`,
+      );
     }
     case 'voice status': {
       const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
@@ -555,6 +592,16 @@ async function handleButton(ctx: AppContext, i: BotInteraction): Promise<BotRepl
   if (kind === 'confirm') {
     await confirmResult(ctx, i.user.id, Number(a), src);
     return reply('✅ Result confirmed.');
+  }
+  if (kind === 'vote') {
+    const m = getMatch(ctx, Number(a));
+    if (!m || loadTournament(ctx, m.tournament_id).guild_id !== i.guildId) return reply('This match is not in this server.');
+    const r = await voteResult(ctx, i.user.id, m.id, b === 'b' ? 'b' : 'a', src);
+    const team = b === 'b' ? '🟠' : '🔵';
+    if (r.outcome === 'completed') return reply(`✅ Result recorded: ${team} won. The next match opens automatically.`);
+    if (r.outcome === 'disputed') return reply('⚠️ The votes disagree, so the organizers were asked to set the result.');
+    if (r.outcome === 'unchanged') return reply(`You already voted ${team}. Votes so far: 🔵 ${r.tally.a} · 🟠 ${r.tally.b}.`);
+    return reply(`🗳️ Vote counted for ${team}. Votes so far: 🔵 ${r.tally.a} · 🟠 ${r.tally.b}.`);
   }
   if (kind === 'inv') {
     await respondInvitation(ctx, i.user.id, Number(b), a === 'accept', src);
