@@ -1,0 +1,29 @@
+{
+  "name": "rl-tournaments",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Rocket League tournament platform: website + Discord bot + 6mans engine, built to run for $0.",
+  "license": "MIT",
+  "workspaces": ["packages/core", "apps/server", "apps/web"],
+  "engines": { "node": ">=22.12" },
+  "scripts": {
+    "build": "npm run build -w apps/server && npm run build -w apps/web",
+    "typecheck": "tsc -p packages/core && tsc -p apps/server && tsc -p apps/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node e2e/run-e2e.mjs",
+    "dev:server": "npm run dev -w apps/server",
+    "dev:web": "npm run dev -w apps/web",
+    "start": "npm run start -w apps/server",
+    "migrate": "npm run migrate -w apps/server",
+    "register-commands": "npm run register-commands -w apps/server",
+    "backup": "npm run backup -w apps/server"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "fast-check": "4.10.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}
