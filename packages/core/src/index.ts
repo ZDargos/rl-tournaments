@@ -15,3 +15,4 @@ export * from './sixmans/validate.js';
 export * from './sixmans/standings.js';
 export * from './sixmans/finals.js';
 export * from './permissions.js';
+export * from './sixmans/rounds.js';

@@ -123,7 +123,12 @@ export const COMMANDS = [
     options: [
       sub('make-pools', 'Make Pools (preview)', [tournament(), { type: INTEGER, name: 'pools', description: 'Number of pools', min_value: 1, max_value: 32 }]),
       sub('confirm-pools', 'Confirm the proposed pools', [tournament()]),
-      sub('schedule', 'Generate the group-stage schedule (preview)', [tournament(), { type: INTEGER, name: 'rounds', description: 'Rounds per pool', required: true, min_value: 1, max_value: 60 }, { type: BOOLEAN, name: 'skill_balanced', description: 'Balance teams by skill' }]),
+      sub('schedule', 'Generate the group-stage schedule (preview)', [
+        tournament(),
+        { type: INTEGER, name: 'games', description: 'Games per player, same for everyone (rounds are worked out per pool)', min_value: 1, max_value: 60 },
+        { type: INTEGER, name: 'rounds', description: 'Instead: a fixed number of rounds for every pool', min_value: 1, max_value: 60 },
+        { type: BOOLEAN, name: 'skill_balanced', description: 'Balance teams by skill' },
+      ]),
       sub('swap', 'Swap two players within a scheduled round', [tournament(), { type: INTEGER, name: 'pool', description: 'Pool number (1 = A)', required: true, min_value: 1 }, { type: INTEGER, name: 'round', description: 'Round', required: true, min_value: 1 }, user('player_a', 'First player'), user('player_b', 'Second player')]),
       sub('confirm-schedule', 'Confirm the schedule', [tournament()]),
       sub('finals-teams', 'Hand-pick the finals teams (first team = top seed)', [tournament(), { type: STRING, name: 'teams', description: 'Mentions, 3 per team, teams split by | e.g. @a @b @c | @d @e @f', required: true, max_length: 1500 }]),
@@ -173,7 +178,7 @@ export const SETTING_SUGGESTIONS = [
   'registration.rosterLock', 'registration.opensAt', 'registration.closesAt', 'checkIn.enabled', 'checkIn.opensMinutesBefore', 'checkIn.closesMinutesBefore',
   'schedule.startAt', 'schedule.timezone', 'schedule.autoStart', 'seeding.method', 'results.confirmation', 'results.autoConfirmMinutes', 'minEntrants',
   'singleElim.thirdPlaceMatch', 'doubleElim.grandFinalReset', 'swiss.rounds', 'roundRobin.encounters', 'sixmans.poolCount', 'sixmans.skillMethod',
-  'sixmans.roundsPerPool', 'sixmans.skillBalancedTeams', 'sixmans.groupBestOf', 'sixmans.finalsBestOf', 'sixmans.qualifiersPerPool', 'sixmans.qualifierAdjustment',
+  'sixmans.roundsMode', 'sixmans.gamesPerPlayer', 'sixmans.roundsPerPool', 'sixmans.skillBalancedTeams', 'sixmans.groupBestOf', 'sixmans.finalsBestOf', 'sixmans.qualifiersPerPool', 'sixmans.qualifierAdjustment',
   'notifications.channelAnnouncements', 'notifications.dms', 'notifications.announcementChannelId', 'notifications.startReminders', 'notifications.matchReminders',
   'scoreReports.channelId', 'scoreReports.votesNeeded', 'scoreReports.requireBothTeams', 'voice.lobbyChannelId', 'voice.lobbySeconds',
   'sixmans.poolShuffleTolerance', 'voice.enabled', 'voice.moveConnectedPlayers', 'voice.visibleToParticipants', 'voice.categoryId', 'teamSize', 'registrationMode', 'format',

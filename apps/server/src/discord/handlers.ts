@@ -346,7 +346,7 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
     case 'preset show': {
       const p = presetDto(guildPreset(ctx, i, reqNum(i, 'preset')));
       const c = p.config;
-      const extra = c.format === 'sixmans' ? `\n6mans: ${c.sixmans.poolCount} pools, ${c.sixmans.roundsPerPool} rounds, skill by ${c.sixmans.skillMethod}, balanced teams ${c.sixmans.skillBalancedTeams ? 'on' : 'off'}` : '';
+      const extra = c.format === 'sixmans' ? `\n6mans: ${c.sixmans.poolCount} pools, ${c.sixmans.roundsMode === 'fixed' ? `${c.sixmans.roundsPerPool} rounds` : `equal games (${c.sixmans.gamesPerPlayer ?? 'auto'} per player)`}, skill by ${c.sixmans.skillMethod}, balanced teams ${c.sixmans.skillBalancedTeams ? 'on' : 'off'}` : '';
       return reply(`**${esc(p.name)}** (v${p.version}) — ${FORMAT_LABELS[c.format]}, ${c.teamSize}v${c.teamSize}, ${c.registrationMode} registration, best of ${c.series.bestOf}, check-in ${c.checkIn.enabled ? 'on' : 'off'}, voice ${c.voice.enabled ? 'on' : 'off'}${extra}`);
     }
     case 'preset create': {
@@ -458,17 +458,25 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
     case 'sixmans confirm-pools': {
       const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
       await confirmPools(ctx, uid, t.id, src);
-      return reply(`✅ Pools confirmed. Next: \`/sixmans schedule tournament:${t.id} rounds:${t.cfg.sixmans.roundsPerPool}\`.`);
+      return reply(
+        t.cfg.sixmans.roundsMode === 'fixed'
+          ? `✅ Pools confirmed. Next: \`/sixmans schedule tournament:${t.id} rounds:${t.cfg.sixmans.roundsPerPool}\`.`
+          : `✅ Pools confirmed. Next: \`/sixmans schedule tournament:${t.id}\` (rounds per pool are worked out so everyone plays the same number of games; add \`games:\` to choose how many).`,
+      );
     }
     case 'sixmans schedule': {
       const t = guildTournament(ctx, i, reqNum(i, 'tournament'));
-      const d = await generateSchedule(ctx, uid, t.id, { rounds: reqNum(i, 'rounds'), skillBalanced: optBool(i, 'skill_balanced') }, src);
+      const games = optNum(i, 'games');
+      const rounds = optNum(i, 'rounds');
+      const d = await generateSchedule(ctx, uid, t.id, { ...(games != null ? { games, mode: 'equal_games' as const } : {}), ...(rounds != null && games == null ? { rounds } : {}), skillBalanced: optBool(i, 'skill_balanced') }, src);
       const lines = d.pools.map((p) => {
         const r = p.result;
         if (r.status !== 'ok') return `**Pool ${String.fromCharCode(65 + p.poolIndex)}**: ❌ ${r.infeasibility?.reasons.join(' ')} ${r.infeasibility?.maxFeasibleFound ? `Maximum found: ${r.infeasibility.maxFeasibleFound} rounds${r.infeasibility.maxFeasibleProven ? ' (proven)' : ''}.` : ''}`;
-        return `**Pool ${String.fromCharCode(65 + p.poolIndex)}**: ✅ ${r.rounds.length} rounds, games per player ${r.balance.min}–${r.balance.max}${r.balance.ideal ? ' (ideal)' : r.balance.provenBest ? ' (best possible)' : ''}, no repeated trios.`;
+        const games = r.balance.min === r.balance.max ? `${r.balance.min} games each` : `games per player ${r.balance.min}–${r.balance.max}${r.balance.ideal ? ' (ideal)' : r.balance.provenBest ? ' (best possible)' : ''}`;
+        return `**Pool ${String.fromCharCode(65 + p.poolIndex)}** (${p.playerIds.length} players): ✅ ${r.rounds.length} rounds, ${games}, no repeated trios.`;
       });
-      return reply(`${lines.join('\n')}\nReview the full schedule on the website (${tLink(ctx, t.id, '/manage')}), then \`/sixmans confirm-schedule tournament:${t.id}\`.`);
+      const notes = (d.notes ?? []).map((x) => `ℹ️ ${x}`);
+      return reply(`${[...lines, ...notes].join('\n')}\nReview the full schedule on the website (${tLink(ctx, t.id, '/manage')}), then \`/sixmans confirm-schedule tournament:${t.id}\`.`);
     }
     case 'sixmans swap': {
       const t = guildTournament(ctx, i, reqNum(i, 'tournament'));

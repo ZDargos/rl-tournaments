@@ -6,7 +6,7 @@
 2. Each pool plays a group stage of 3v3 matches with rotating teammates, scored individually.
 3. The top players form balanced 3-player teams for a single-elimination finals bracket.
 
-Every algorithm is deterministic. The same players, settings and seed always give the same result, which makes outcomes explainable and reproducible. The code is in `packages/core/src/sixmans/`.
+Every algorithm is deterministic. The same players, settings and seed always give the same result, which makes outcomes explainable and reproducible. Making pools and generating a schedule pick a new seed each time (stored with the proposal), so regenerating gives a different valid result. The code is in `packages/core/src/sixmans/`.
 
 ## 1. Skill input
 
@@ -21,6 +21,34 @@ The organizer chooses the input: `manual_seed` (seed 1 = strongest) or `rank`. W
 The organizer can re-make pools or move players between them. Edits are validated (everyone exactly once, minimum size), and editing pools clears any schedule.
 
 ## 3. Group-stage schedule
+
+### How many rounds each pool plays
+
+By default (`sixmans.roundsMode = equal_games`) the rounds are worked out so **every player in every pool plays the same number of games**:
+
+- A pool of n players with m matches per round fills 6m player slots per round. Everyone plays equally after R rounds exactly when n divides 6mR, so games per player g = 6mR / n.
+- For one pool the fewest equal games is 6m / gcd(n, 6m). With several pools (sizes differ by at most one) every pool must give the same g, so g is a multiple of the least common multiple of those values. Each pool then plays R = g·n / 6m rounds, so **a bigger pool plays more rounds**.
+- With no `gamesPerPlayer` set the target is at least 3 games each; a requested number is rounded **up** to the next amount every pool can give exactly, and the organizer is told.
+- A plan never exceeds a pool's trio limit (below) or 60 rounds. If it would, the organizer is told to use more pools or fixed rounds.
+
+| Players / pools | Pool sizes | Rounds | Games each |
+|---|---|---|---|
+| 8 / 1 | 8 | 4 | 3 |
+| 9 / 1 | 9 | 6 | 4 |
+| 13 / 2 | 7 + 6 | 7 / 6 | 6 |
+| 16 / 2 | 8 + 8 | 4 / 4 | 3 |
+| 17 / 2 | 9 + 8 | 9 / 8 | 6 |
+
+The website shows this live when 6mans is chosen (with a player-count preview) and again before generating the schedule. Pitfalls it handles or points out:
+
+- **Different finish times:** the pool with more rounds finishes later; the finals start when every pool is done.
+- **Long or idle group stages:** prime-sized pools (7, 11, 13, ...) need as many rounds as players. Pools with many players sitting out each round get a hint to use more pools or 2 matches per round.
+- **Changes after confirming:** changing the games setting, rounds mode, pools or players makes the confirmed schedule stale, and the start checks refuse to start until it is regenerated.
+- **Older tournaments:** tournaments that already had a schedule or had started keep the fixed rounds they were set up with (migration 003).
+
+`roundsMode = fixed` keeps the old behaviour: every pool plays `roundsPerPool` rounds and games per player can differ by one.
+
+### Building the schedule
 
 Each round of a pool has one 3v3 match by default. Players not in that match sit out the round.
 

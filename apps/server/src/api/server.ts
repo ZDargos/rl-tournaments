@@ -400,7 +400,10 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
   app.put('/api/tournaments/:id/sixmans/pools', async (req) => editPools(ctx, requireUser(req).id, tid(req), z.object({ pools: z.array(z.array(snowflake)).min(1).max(32) }).parse(req.body).pools, src));
   app.post('/api/tournaments/:id/sixmans/pools/confirm', async (req) => confirmPools(ctx, requireUser(req).id, tid(req), src));
   app.post('/api/tournaments/:id/sixmans/schedule', async (req) =>
-    generateSchedule(ctx, requireUser(req).id, tid(req), z.object({ rounds: z.number().int().min(1).max(60).optional(), matchesPerRound: z.number().int().min(1).max(5).optional(), skillBalanced: z.boolean().optional() }).parse(req.body ?? {}), src));
+    generateSchedule(ctx, requireUser(req).id, tid(req), z.object({
+      rounds: z.number().int().min(1).max(60).optional(), games: z.number().int().min(1).max(60).nullable().optional(), mode: z.enum(['equal_games', 'fixed']).optional(),
+      matchesPerRound: z.number().int().min(1).max(5).optional(), skillBalanced: z.boolean().optional(),
+    }).parse(req.body ?? {}), src));
   app.post('/api/tournaments/:id/sixmans/schedule/swap', async (req) =>
     swapScheduledPlayers(ctx, requireUser(req).id, tid(req), z.object({ poolIndex: z.number().int().min(0), round: z.number().int().min(1), playerA: snowflake, playerB: snowflake }).parse(req.body), src));
   app.post('/api/tournaments/:id/sixmans/schedule/confirm', async (req) => confirmSchedule(ctx, requireUser(req).id, tid(req), src));

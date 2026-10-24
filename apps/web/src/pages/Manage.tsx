@@ -151,7 +151,7 @@ function Settings({ d, reload }: { d: any; reload: () => void }) {
         </div>
         <div style={{ marginTop: 12 }}><Field label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={4000} /></Field></div>
       </div>
-      <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} /></div>
+      <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} playerCount={d.entries.filter((e: any) => e.status === 'confirmed').length} /></div>
       <ErrorBox error={error} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn primary" disabled={busy} onClick={async () => {

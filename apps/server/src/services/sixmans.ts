@@ -1,6 +1,6 @@
 import {
   buildFinalsBracket, computeSixmansStandings, computeSkills, conflict, crossPoolOrder, defaultQualifiersPerPool, finalsOptions, formFinalsTeams, invalid,
-  handPickedOption, isPreStart, makePools, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
+  handPickedOption, isPreStart, makePools, planEqualRounds, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
   type FinalsOption, type FinalsTeam, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
 } from '@rl/core';
 import type { AppContext, Source } from './context.js';
@@ -83,7 +83,12 @@ export function planFingerprints(ctx: AppContext, t: LoadedTournament, playerIds
   const pools = sha256(JSON.stringify({ players: skills.map((s) => [s.id, s.skill]).sort(), method: t.cfg.sixmans.skillMethod, count: t.cfg.sixmans.poolCount }));
   const poolRows = ctx.db.prepare('SELECT p.idx, pm.user_id FROM pools p JOIN pool_members pm ON pm.pool_id = p.id WHERE p.tournament_id = ? ORDER BY p.idx, pm.user_id').all(t.id);
   const schedule = sha256(
-    JSON.stringify({ pools: poolRows, rounds: t.cfg.sixmans.roundsPerPool, m: t.cfg.sixmans.matchesPerRound, balanced: t.cfg.sixmans.skillBalancedTeams, poolsFp: pools }),
+    JSON.stringify({
+      pools: poolRows, rounds: t.cfg.sixmans.roundsPerPool,
+      // Only in equal-games mode, so schedules confirmed before that mode existed (fixed) stay valid.
+      ...(t.cfg.sixmans.roundsMode === 'equal_games' ? { mode: 'equal_games', games: t.cfg.sixmans.gamesPerPlayer } : {}),
+      m: t.cfg.sixmans.matchesPerRound, balanced: t.cfg.sixmans.skillBalancedTeams, poolsFp: pools,
+    }),
   );
   return { pools, schedule };
 }
@@ -195,13 +200,34 @@ function poolsWithMembers(ctx: AppContext, tournamentId: number) {
   }));
 }
 
+export interface ScheduleInput {
+  /** Fixed rounds for every pool (implies mode 'fixed' unless a mode is given). */
+  rounds?: number;
+  /** Equal-games target per player (implies mode 'equal_games' unless a mode is given); null = automatic. */
+  games?: number | null;
+  mode?: 'equal_games' | 'fixed';
+  matchesPerRound?: number;
+  skillBalanced?: boolean;
+}
+
+/** Rounds each pool plays under the tournament's settings, or the reasons it cannot be planned. */
+export function roundsPerPoolPlan(t: LoadedTournament, poolSizes: number[]) {
+  const s = t.cfg.sixmans;
+  if (s.roundsMode === 'fixed') return { mode: 'fixed' as const, rounds: poolSizes.map(() => s.roundsPerPool), games: null, notes: [] as string[], problems: [] as string[] };
+  const plan = planEqualRounds({ poolSizes, matchesPerRound: s.matchesPerRound, games: s.gamesPerPlayer });
+  return { mode: 'equal_games' as const, rounds: plan.chosen?.rounds ?? [], games: plan.chosen?.games ?? null, notes: plan.notes, problems: plan.problems, options: plan.options };
+}
+
 /** Generate (preview) the group-stage schedule for every pool. */
-export async function generateSchedule(ctx: AppContext, actorId: string, id: number, input: { rounds?: number; matchesPerRound?: number; skillBalanced?: boolean }, source: Source) {
+export async function generateSchedule(ctx: AppContext, actorId: string, id: number, input: ScheduleInput, source: Source) {
   let t = await prestartManager(ctx, actorId, id);
   const pools = currentPlan(ctx, t.id, 'pools');
   if (!pools || pools.status !== 'confirmed') throw conflict('pools_not_confirmed', 'Confirm the pools first.');
   const patch: Record<string, unknown> = {};
+  const mode = input.mode ?? (input.rounds != null ? 'fixed' : input.games !== undefined ? 'equal_games' : undefined);
+  if (mode && mode !== t.cfg.sixmans.roundsMode) patch.roundsMode = mode;
   if (input.rounds != null && input.rounds !== t.cfg.sixmans.roundsPerPool) patch.roundsPerPool = input.rounds;
+  if (input.games !== undefined && input.games !== t.cfg.sixmans.gamesPerPlayer) patch.gamesPerPlayer = input.games;
   if (input.matchesPerRound != null && input.matchesPerRound !== t.cfg.sixmans.matchesPerRound) patch.matchesPerRound = input.matchesPerRound;
   if (input.skillBalanced != null && input.skillBalanced !== t.cfg.sixmans.skillBalancedTeams) patch.skillBalancedTeams = input.skillBalanced;
   if (Object.keys(patch).length) {
@@ -209,12 +235,20 @@ export async function generateSchedule(ctx: AppContext, actorId: string, id: num
     t = await updateTournament(ctx, actorId, id, { configPatch: { sixmans: patch } }, source);
   }
   const s = t.cfg.sixmans;
+  const poolRows = poolsWithMembers(ctx, t.id);
+  const rp = roundsPerPoolPlan(t, poolRows.map((p) => p.members.length));
+  if (rp.problems.length) throw invalid('rounds_unplannable', rp.problems.join(' '), { problems: rp.problems });
   const seed = freshSeed();
-  const data: SchedulePlanData = { rounds: s.roundsPerPool, matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed, pools: [] };
-  for (const p of poolsWithMembers(ctx, t.id)) {
+  const notes = [...rp.notes];
+  const data: SchedulePlanData = {
+    rounds: Math.max(...rp.rounds), mode: rp.mode, games: rp.games, notes,
+    matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed, pools: [],
+  };
+  for (const [i, p] of poolRows.entries()) {
+    const rounds = rp.rounds[i];
     const result = scheduleGroupStage({
       players: p.members.map((m) => ({ id: m.user_id, skill: m.skill })),
-      rounds: s.roundsPerPool,
+      rounds,
       matchesPerRound: s.matchesPerRound,
       skillBalanced: s.skillBalancedTeams,
       seed: seed + p.idx,
@@ -222,16 +256,17 @@ export async function generateSchedule(ctx: AppContext, actorId: string, id: num
     });
     if (result.status === 'ok') {
       // Independent re-validation before anything is accepted.
-      const v = validateSchedule(result, p.members.map((m) => m.user_id), { matchesPerRound: s.matchesPerRound, rounds: s.roundsPerPool, maxSpread: result.balance.spread });
+      const v = validateSchedule(result, p.members.map((m) => m.user_id), { matchesPerRound: s.matchesPerRound, rounds, maxSpread: result.balance.spread });
       if (!v.valid) throw new Error(`Scheduler produced an invalid schedule for ${p.name}: ${v.errors.join('; ')}`);
+      if (rp.mode === 'equal_games' && result.balance.spread !== 0) notes.push(`${p.name}: no schedule with exactly equal games was found in time; games per player are ${result.balance.min}–${result.balance.max}. Regenerate to try again.`);
     }
-    data.pools.push({ poolId: p.id, poolIndex: p.idx, playerIds: p.members.map((m) => m.user_id), result });
+    data.pools.push({ poolId: p.id, poolIndex: p.idx, rounds, playerIds: p.members.map((m) => m.user_id), result });
   }
   tx(ctx, () => {
     savePlan(ctx, t, 'schedule', 'proposed', data, planFingerprints(ctx, t).schedule, actorId);
     audit(ctx, {
       guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.schedule_generated',
-      details: { rounds: data.rounds, statuses: data.pools.map((p) => p.result.status), source },
+      details: { mode: data.mode, games: data.games, rounds: data.pools.map((p) => p.rounds), statuses: data.pools.map((p) => p.result.status), source },
     });
   });
   return data;
@@ -247,7 +282,7 @@ export async function swapScheduledPlayers(ctx: AppContext, actorId: string, id:
   if (!pool || pool.result.status !== 'ok') throw notFound('Pool schedule');
   if (!pool.playerIds.includes(input.playerA) || !pool.playerIds.includes(input.playerB)) throw invalid('not_in_pool', 'Both players must be in this pool.');
   const swapped = swapInRound(pool.result, input.round, input.playerA, input.playerB, pool.playerIds);
-  const v = validateSchedule(swapped, pool.playerIds, { matchesPerRound: data.matchesPerRound, rounds: data.rounds, maxSpread: pool.result.balance.spread });
+  const v = validateSchedule(swapped, pool.playerIds, { matchesPerRound: data.matchesPerRound, rounds: pool.rounds ?? data.rounds, maxSpread: pool.result.balance.spread });
   if (!v.valid) throw invalid('invalid_edit', `That change is not allowed: ${v.errors.join(' ')}`, { errors: v.errors });
   const skills = new Map(ctx.db.prepare('SELECT user_id, skill FROM pool_members WHERE pool_id = ?').all(pool.poolId).map((r) => [(r as { user_id: string }).user_id, (r as { skill: number }).skill]));
   for (const rd of swapped.rounds)
@@ -275,7 +310,7 @@ export async function confirmSchedule(ctx: AppContext, actorId: string, id: numb
       const inf = p.result.infeasibility;
       throw conflict('schedule_infeasible', `Pool ${p.poolIndex + 1} has no valid schedule: ${inf?.reasons.join(' ') ?? ''} ${inf?.alternatives.join(' ') ?? ''}`.trim(), { infeasibility: inf });
     }
-    const v = validateSchedule(p.result, p.playerIds, { matchesPerRound: data.matchesPerRound, rounds: data.rounds, maxSpread: p.result.balance.spread });
+    const v = validateSchedule(p.result, p.playerIds, { matchesPerRound: data.matchesPerRound, rounds: p.rounds ?? data.rounds, maxSpread: p.result.balance.spread });
     if (!v.valid) throw invalid('invalid_schedule', v.errors.join(' '));
   }
   tx(ctx, () => {
