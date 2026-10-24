@@ -144,3 +144,36 @@ describe('availability confirmations', () => {
     expect((await handleInteraction(s.ctx, dmButton(ps[0].id, `avail:${tid}:yes`)))!.content).toMatch(/already started/);
   });
 });
+
+describe('availability checks sent by organizers', () => {
+  const startDms = (s: any, userId: string) => s.discord.sent.filter((m: any) => m.kind === 'dm' && m.target === userId && /Can you still make it/.test(m.content));
+
+  it('sends the reminder to everyone or to one player, by DM only, and asks again', async () => {
+    const { s, admin, ps, tid, statusOf } = await upcoming({ dms: false });
+    const channelBefore = s.discord.sent.filter((m) => m.kind === 'channel').length;
+
+    const one = ok(await admin.post(`/api/tournaments/${tid}/availability-check`, { userId: ps[1].id })).body;
+    expect(one.recipients).toBe(1);
+    await s.settle();
+    expect(startDms(s, ps[1].id).length).toBe(1);
+    expect(startDms(s, ps[0].id).length).toBe(0);
+    expect(await statusOf(ps[1].id)).toBe('awaiting');
+    // A double click in the same minute does not DM twice.
+    expect((await admin.post(`/api/tournaments/${tid}/availability-check`, { userId: ps[1].id })).status).toBe(409);
+
+    s.clock.advance(2);
+    expect(ok(await admin.post(`/api/tournaments/${tid}/availability-check`, {})).body.recipients).toBe(4);
+    await s.settle();
+    for (const p of ps) expect(startDms(s, p.id).length).toBe(p.id === ps[1].id ? 2 : 1);
+    expect(s.discord.sent.filter((m) => m.kind === 'channel').length).toBe(channelBefore);
+  });
+
+  it('is for organizers only, before the start', async () => {
+    const { s, admin, ps, tid } = await upcoming();
+    expect((await ps[0].post(`/api/tournaments/${tid}/availability-check`, {})).status).toBe(403);
+    expect((await admin.post(`/api/tournaments/${tid}/availability-check`, { userId: '99999999999' })).status).toBe(404);
+    ok(await admin.post(`/api/tournaments/${tid}/actions/start`));
+    await s.settle();
+    expect((await admin.post(`/api/tournaments/${tid}/availability-check`, {})).status).toBe(409);
+  });
+});

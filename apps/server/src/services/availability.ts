@@ -1,7 +1,7 @@
 import { conflict, forbidden, isPreStart, notFound } from '@rl/core';
 import type { AppContext, Source } from './context.js';
 import { nowIso, tx } from './context.js';
-import { getAccess, loadTournament, type LoadedTournament } from './access.js';
+import { getAccess, loadTournament, participantIds, type LoadedTournament } from './access.js';
 import { audit } from './audit.js';
 import { enqueue } from './notifications.js';
 import { userNames } from './users.js';
@@ -61,18 +61,50 @@ function activePlayer(ctx: AppContext, tournamentId: number, userId: string) {
     .get(tournamentId, userId);
 }
 
-/** A start reminder with buttons reached this player. Keeps an existing answer for the same start time. */
-export function markAsked(ctx: AppContext, t: LoadedTournament, userId: string) {
+/**
+ * A start reminder with buttons reached this player. Keeps an existing answer for the same start time,
+ * except that an organizer asking again turns a "maybe" (no reply) back into a fresh question.
+ */
+export function markAsked(ctx: AppContext, t: LoadedTournament, userId: string, askAgain = false) {
   const now = nowIso(ctx);
   ctx.db
     .prepare(
       `INSERT INTO availability (tournament_id, user_id, start_at, status, asked_at, answered_at, answered_by, updated_at) VALUES (?, ?, ?, 'awaiting', ?, NULL, NULL, ?)
        ON CONFLICT(tournament_id, user_id) DO UPDATE SET start_at = excluded.start_at, status = 'awaiting', asked_at = excluded.asked_at, answered_at = NULL, answered_by = NULL, updated_at = excluded.updated_at
-       WHERE availability.start_at <> excluded.start_at`,
+       WHERE availability.start_at <> excluded.start_at OR (? AND availability.status = 'maybe')`,
     )
-    .run(t.id, userId, startKey(t), now, now);
+    .run(t.id, userId, startKey(t), now, now, askAgain ? 1 : 0);
   // Answered on the website before any reminder: remember when they were first asked anyway.
   ctx.db.prepare('UPDATE availability SET asked_at = ? WHERE tournament_id = ? AND user_id = ? AND asked_at IS NULL').run(now, t.id, userId);
+}
+
+/**
+ * An organizer sends the start reminder (with the "can you still make it?" buttons) right now, to
+ * every player or to one. It goes by DM only, even when the tournament's DMs or start reminders are
+ * off; players who turned off bot DMs or muted the tournament are still skipped.
+ */
+export async function sendAvailabilityCheck(ctx: AppContext, actorId: string, tournamentId: number, userId: string | null, source: Source) {
+  const t = loadTournament(ctx, tournamentId);
+  if (!(await getAccess(ctx, t, actorId)).canManage) throw forbidden('Only organizers can send reminders.');
+  if (!isPreStart(t.state)) throw conflict('already_started', t.state === 'cancelled' ? 'This tournament was cancelled.' : 'The tournament has already started.');
+  const startAt = t.cfg.schedule.startAt;
+  if (!startAt) throw conflict('no_start_time', 'Set a start time first: the reminder tells players when the tournament starts.');
+  if (userId && !activePlayer(ctx, t.id, userId)) throw notFound('That player’s registration');
+  const recipients = userId ? 1 : participantIds(ctx, t.id).length;
+  if (!recipients) throw conflict('no_players', 'Nobody has registered yet.');
+  // One send per target per minute, so a double click does not DM twice.
+  const minute = Math.floor(ctx.clock.now().getTime() / 60_000);
+  const queued = tx(ctx, () => {
+    const ok = enqueue(ctx, {
+      tournamentId: t.id, category: 'tournament_start', kind: 'reminder', key: `t${t.id}:manual-start:${userId ?? 'all'}:${startAt}:${minute}`,
+      expiresAt: startAt, audience: userId ? `user:${userId}` : 'participants', payload: { manual: true }, ref: startAt,
+    });
+    if (ok) audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'registration.availability_check', target: userId ? `user:${userId}` : 'all', details: { source } });
+    return ok;
+  });
+  if (!queued) throw conflict('recently_sent', 'That reminder was just sent. Try again in a minute.');
+  ctx.kick(t.id);
+  return { recipients };
 }
 
 /** A player answers for themselves, or an organizer sets the answer for a player. */
