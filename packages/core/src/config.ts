@@ -158,6 +158,11 @@ export const configSchema = z.object({
       rankValues: z.partialRecord(z.enum(RANK_IDS as [string, ...string[]]), z.number()).prefault({}),
       /** How to treat players without a seed/rank. */
       missingSkill: z.enum(['lowest', 'median']).default('lowest'),
+      /**
+       * "Make pools" may swap players whose skill differs by at most this much (rank scale: 4 per
+       * rank, 1 per division), keeping pools balanced. 0 = only identical skill values are swapped.
+       */
+      poolShuffleTolerance: z.number().min(0).max(20).default(2),
       roundsPerPool: z.number().int().min(1).max(60).default(4),
       matchesPerRound: z.number().int().min(1).max(5).default(1),
       skillBalancedTeams: z.boolean().default(true),

@@ -12,13 +12,16 @@ import { tieKey } from '../rng.js';
  *   2. HARD: every round has exactly m matches.
  *   3. Appearance balance: the spread (max - min games per player) is as small as possible.
  *   4. Optional: skill balance (minimise |sum(teamA) - sum(teamB)| per match).
- *   5. Soft: avoid repeating teammate pairs and long sit-out streaks.
+ *   5. Soft: vary who sits out together (and avoid sitting out twice in a row), avoid repeating
+ *      teammate pairs.
  *
  * Method: depth-first search over rounds with backtracking.
  *   - For a target appearance window [lo, hi] each node prunes on: players who can no longer reach
  *     lo, players already at hi, must-play players (a_i + remaining == lo), and slot-count bounds.
- *   - Participants are enumerated with the fewest-appearance players first (then longest sit-out,
- *     then a seeded hash), so the first solution found is usually the natural rotation.
+ *   - The players who play each round are chosen by a cost: sitting out in consecutive rounds is
+ *     penalised, and so is sitting out alongside someone you already sat out with. Ties are broken
+ *     by a hash that changes every round, so the same group does not keep sitting out together.
+ *     (When there are too many combinations to rank, the old fewest-appearances-first order is used.)
  *   - Team splits use only unused trios, ordered by skill difference (when enabled) and repeated
  *     pairs; ties use a seeded hash so results are deterministic for a given seed.
  *   - Windows are tried from the tightest achievable spread upward. If a window is searched
@@ -62,6 +65,8 @@ export interface ScheduledRound {
 }
 
 export interface ScheduleResult {
+  /** Seed that produced this schedule (the same seed and players always give the same schedule). */
+  seed?: number;
   status: 'ok' | 'infeasible' | 'unknown';
   rounds: ScheduledRound[];
   appearances: Record<string, number>;
@@ -77,6 +82,8 @@ export interface ScheduleResult {
     provenBest: boolean;
   };
   skill: { enabled: boolean; totalDiff: number; maxDiff: number; label: 'best_found' };
+  /** How often the same players sat out together, and back-to-back sit-outs. */
+  sitOuts?: { repeatedPairs: number; backToBack: number };
   infeasibility?: {
     reasons: string[];
     upperBoundRounds: number;
@@ -106,6 +113,13 @@ interface Ctx {
   app: number[];
   lastPlayed: number[];
   rounds: { matches: [number[], number[]][] }[];
+  /** n*n: how many rounds each pair of players has sat out together. */
+  sitPair: Uint16Array;
+  /** Per-round tie keys (seed + round), built lazily. */
+  roundKeys: number[][];
+  ids: string[];
+  /** Rank line-ups by sit-out variety (false = plain rotation order, faster on tight instances). */
+  variety: boolean;
   nodes: number;
   nodeLimit: number;
   deadline: number;
@@ -217,14 +231,17 @@ function dfs(ctx: Ctx, r: number): boolean {
   if (must.length > slots) return false;
   const free = slots - must.length;
   if (eligible.length < free) return false;
-  // Preference: fewest appearances, then longest since last played, then seeded key.
-  eligible.sort((x, y) => ctx.app[x] - ctx.app[y] || ctx.lastPlayed[x] - ctx.lastPlayed[y] || ctx.key[x] - ctx.key[y]);
-  for (const pick of combinations(eligible, free)) {
-    const participants = [...must, ...pick].sort((x, y) => ctx.app[x] - ctx.app[y] || ctx.key[x] - ctx.key[y]);
+  const rk = roundKey(ctx, r);
+  for (const pick of pickOrder(ctx, r, must, eligible, free)) {
+    const participants = [...must, ...pick].sort((x, y) => ctx.app[x] - ctx.app[y] || rk[x] - rk[y]);
+    const playing = new Set(participants);
+    const sitting: number[] = [];
+    for (let i = 0; i < n; i++) if (!playing.has(i)) sitting.push(i);
     for (const part of partitions(ctx, participants)) {
       // apply
       const prevLast = participants.map((p) => ctx.lastPlayed[p]);
       for (const mt of part) mark(ctx, mt, 1);
+      markSitting(ctx, sitting, 1);
       for (const p of participants) {
         ctx.app[p]++;
         ctx.lastPlayed[p] = r;
@@ -236,12 +253,78 @@ function dfs(ctx: Ctx, r: number): boolean {
         ctx.app[p]--;
         ctx.lastPlayed[p] = prevLast[i];
       });
+      markSitting(ctx, sitting, -1);
       for (const mt of part) mark(ctx, mt, -1);
       if (ctx.aborted) return false;
     }
     if (ctx.aborted) return false;
   }
   return false;
+}
+
+/** Tie keys for one round: a different shuffle of the players every round. */
+function roundKey(ctx: Ctx, r: number): number[] {
+  return (ctx.roundKeys[r] ??= ctx.ids.map((id) => tieKey(id, `${ctx.seed}:r${r}`)));
+}
+
+function markSitting(ctx: Ctx, sitting: number[], delta: 1 | -1) {
+  for (let i = 0; i < sitting.length; i++)
+    for (let j = i + 1; j < sitting.length; j++) {
+      ctx.sitPair[sitting[i] * ctx.n + sitting[j]] += delta;
+      ctx.sitPair[sitting[j] * ctx.n + sitting[i]] += delta;
+    }
+}
+
+/** Above this many candidate line-ups per round, fall back to a lazy (unranked) enumeration. */
+const RANKED_PICK_LIMIT = 4000;
+
+const binom = (n: number, k: number) => {
+  let r = 1;
+  for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i;
+  return Math.round(r);
+};
+
+/**
+ * Which `free` players (besides the must-play ones) take the remaining slots this round, best first.
+ * Cost, lowest first:
+ *   - 1000 per player who would sit out a third round in a row,
+ *   - 4 per player who would sit out two rounds in a row,
+ *   - 1 for every earlier round each pair of sitters already sat out together,
+ *   - 1 per appearance the picked players already have (keeps the rotation fair).
+ * Ties are broken by a per-round seeded hash, so there is no fixed sit-out group.
+ */
+function* pickOrder(ctx: Ctx, r: number, must: number[], eligible: number[], free: number): Generator<number[]> {
+  const rk = roundKey(ctx, r);
+  if (!ctx.variety || binom(eligible.length, free) > RANKED_PICK_LIMIT) {
+    eligible.sort((x, y) => ctx.app[x] - ctx.app[y] || ctx.lastPlayed[x] - ctx.lastPlayed[y] || rk[x] - rk[y]);
+    yield* combinations(eligible, free);
+    return;
+  }
+  const n = ctx.n;
+  const mustSet = new Set(must);
+  const ranked: { pick: number[]; cost: number; tk: number }[] = [];
+  const isPicked = new Uint8Array(n);
+  for (const pick of combinations(eligible, free)) {
+    for (const p of pick) isPicked[p] = 1;
+    let cost = 0;
+    let tk = 0;
+    const sitting: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if (isPicked[i] || mustSet.has(i)) continue;
+      sitting.push(i);
+      const idle = r - 1 - ctx.lastPlayed[i]; // rounds already sat out in a row
+      if (r > 0 && idle >= 1) cost += idle >= 2 ? 1000 : 4;
+    }
+    for (let i = 0; i < sitting.length; i++) for (let j = i + 1; j < sitting.length; j++) cost += ctx.sitPair[sitting[i] * n + sitting[j]];
+    for (const p of pick) {
+      cost += ctx.app[p];
+      tk = (tk + rk[p]) >>> 0;
+      isPicked[p] = 0;
+    }
+    ranked.push({ pick, cost, tk });
+  }
+  ranked.sort((a, b) => a.cost - b.cost || a.tk - b.tk);
+  for (const x of ranked) yield x.pick;
 }
 
 function windowsFor(T: number, n: number, R: number): { lo: number; hi: number; spread: number }[] {
@@ -261,7 +344,7 @@ function windowsFor(T: number, n: number, R: number): { lo: number; hi: number; 
   return out;
 }
 
-function runSearch(req: Required<Omit<ScheduleRequest, 'players'>> & { players: SchedulePlayer[] }, deadline: number) {
+function runSearch(req: Required<Omit<ScheduleRequest, 'players'>> & { players: SchedulePlayer[] }, deadline: number, variety = false) {
   const n = req.players.length;
   const m = req.matchesPerRound;
   const R = req.rounds;
@@ -281,6 +364,10 @@ function runSearch(req: Required<Omit<ScheduleRequest, 'players'>> & { players: 
       app: new Array(n).fill(0),
       lastPlayed: new Array(n).fill(-1),
       rounds: [],
+      sitPair: new Uint16Array(n * n),
+      roundKeys: [],
+      ids: req.players.map((p) => p.id),
+      variety,
       nodes: 0,
       nodeLimit: req.nodeLimit,
       deadline,
@@ -346,6 +433,7 @@ function buildResult(players: SchedulePlayer[], ctx: Ctx, T: number, idealSpread
   const vals = Object.values(appearances);
   const diffs = rounds.flatMap((r) => r.matches.map((m) => Math.abs(m.skillA - m.skillB)));
   return {
+    seed: ctx.seed,
     status: 'ok',
     rounds,
     appearances,
@@ -354,8 +442,28 @@ function buildResult(players: SchedulePlayer[], ctx: Ctx, T: number, idealSpread
       idealSpread, totalSlots: T, ideal: Math.max(...vals) - Math.min(...vals) === idealSpread, provenBest,
     },
     skill: { enabled: balanced, totalDiff: diffs.reduce((s, d) => s + d, 0), maxDiff: diffs.length ? Math.max(...diffs) : 0, label: 'best_found' },
+    sitOuts: sitOutStats(rounds),
     stats: { nodes, ms, exhaustive, windowsTried: tried },
   };
+}
+
+/** Repeated sit-out pairs (each pair counted once per extra round together) and back-to-back sit-outs. */
+export function sitOutStats(rounds: { sitOut?: string[] }[]): { repeatedPairs: number; backToBack: number } {
+  const seen = new Map<string, number>();
+  let repeatedPairs = 0;
+  let backToBack = 0;
+  rounds.forEach((rd, i) => {
+    const s = (rd.sitOut ?? []).slice().sort();
+    for (let a = 0; a < s.length; a++)
+      for (let b = a + 1; b < s.length; b++) {
+        const k = `${s[a]}|${s[b]}`;
+        const c = seen.get(k) ?? 0;
+        if (c) repeatedPairs++;
+        seen.set(k, c + 1);
+      }
+    if (i > 0) backToBack += s.filter((x) => rounds[i - 1].sitOut?.includes(x)).length;
+  });
+  return { repeatedPairs, backToBack };
 }
 
 export function scheduleGroupStage(input: ScheduleRequest): ScheduleResult {
@@ -412,7 +520,14 @@ export function scheduleGroupStage(input: ScheduleRequest): ScheduleResult {
   }
 
   const deadline = started + req.timeLimitMs;
-  const res = runSearch(req, deadline);
+  // First look for a schedule that also varies who sits out together, using half the budget. Tight
+  // instances (near the trio bound) can be slow to solve that way, so if the budget runs out the
+  // plain rotation order gets the rest. Both searches enforce the same hard rules.
+  let res = runSearch({ ...req, nodeLimit: Math.floor(req.nodeLimit / 2) }, started + req.timeLimitMs / 2, true);
+  if (!res.ok && res.aborted) {
+    const plain = runSearch(req, deadline);
+    res = { ...plain, nodes: plain.nodes + res.nodes };
+  }
   if (res.ok) {
     improveSkill(res.ctx);
     return buildResult(req.players, res.ctx, T, idealSpread, res.provenBest, res.nodes, Date.now() - started, true, res.tried, req.skillBalanced);

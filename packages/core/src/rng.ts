@@ -36,7 +36,21 @@ export function seededShuffle<T>(items: readonly T[], seed: number | string): T[
   return out;
 }
 
-/** Stable deterministic tie-break key for an id under a seed. */
+/** murmur3 finaliser: spreads small input differences over all 32 bits. */
+export function mix32(h: number): number {
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return h >>> 0;
+}
+
+/**
+ * Stable deterministic tie-break key for an id under a seed. FNV alone barely changes when only the
+ * last character differs (p01, p02, ...), which made "random" tie-breaks follow id order; the
+ * finaliser fixes that.
+ */
 export function tieKey(id: string, seed: number | string): number {
-  return hashString(`${seed}::${id}`);
+  return mix32(hashString(`${seed}::${id}`));
 }

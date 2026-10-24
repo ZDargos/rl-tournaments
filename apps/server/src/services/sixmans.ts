@@ -10,6 +10,7 @@ import { audit } from './audit.js';
 import { enqueue } from './notifications.js';
 import { matchesOf, type MatchRow } from './queries.js';
 import { entriesOf } from './registration.js';
+import { randomInt } from 'node:crypto';
 import { sha256 } from '../lib/util.js';
 import { userNames } from './users.js';
 import { insertMatch, notifyNewlyReady, syncBracket, type SchedulePlanData } from './engine.js';
@@ -103,8 +104,10 @@ export async function makePoolsProposal(ctx: AppContext, actorId: string, id: nu
     t = await updateTournament(ctx, actorId, id, { configPatch: { sixmans: { poolCount } } }, source);
   }
   const skills = confirmedSkills(ctx, t);
-  const seed = t.cfg.seeding.seed;
-  const res = makePools(skills, t.cfg.sixmans.poolCount, seed);
+  // A fresh seed every time, so "Remake pools" can trade equal / near-equal players between pools.
+  // The seed is stored with the proposal, so any proposal can be reproduced exactly.
+  const seed = freshSeed();
+  const res = makePools(skills, t.cfg.sixmans.poolCount, seed, { tolerance: t.cfg.sixmans.poolShuffleTolerance });
   const byId = new Map(skills.map((s) => [s.id, s]));
   const data: PoolsPlanData = {
     poolCount: t.cfg.sixmans.poolCount,
@@ -179,6 +182,11 @@ export async function confirmPools(ctx: AppContext, actorId: string, id: number,
   return data;
 }
 
+/** Random seed for a new proposal (regenerating should give a different, equally valid result). */
+export function freshSeed(): number {
+  return randomInt(0, 2 ** 31);
+}
+
 function poolsWithMembers(ctx: AppContext, tournamentId: number) {
   const pools = ctx.db.prepare('SELECT * FROM pools WHERE tournament_id = ? ORDER BY idx').all(tournamentId) as { id: number; idx: number; name: string }[];
   return pools.map((p) => ({
@@ -201,14 +209,15 @@ export async function generateSchedule(ctx: AppContext, actorId: string, id: num
     t = await updateTournament(ctx, actorId, id, { configPatch: { sixmans: patch } }, source);
   }
   const s = t.cfg.sixmans;
-  const data: SchedulePlanData = { rounds: s.roundsPerPool, matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed: t.cfg.seeding.seed, pools: [] };
+  const seed = freshSeed();
+  const data: SchedulePlanData = { rounds: s.roundsPerPool, matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed, pools: [] };
   for (const p of poolsWithMembers(ctx, t.id)) {
     const result = scheduleGroupStage({
       players: p.members.map((m) => ({ id: m.user_id, skill: m.skill })),
       rounds: s.roundsPerPool,
       matchesPerRound: s.matchesPerRound,
       skillBalanced: s.skillBalancedTeams,
-      seed: t.cfg.seeding.seed + p.idx,
+      seed: seed + p.idx,
       timeLimitMs: s.schedulerTimeLimitMs,
     });
     if (result.status === 'ok') {

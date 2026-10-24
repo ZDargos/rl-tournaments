@@ -1,5 +1,5 @@
 import { invalid } from '../errors.js';
-import { tieKey } from '../rng.js';
+import { createRng, tieKey } from '../rng.js';
 import type { SkilledPlayer } from './skill.js';
 
 export interface PoolsResult {
@@ -10,6 +10,17 @@ export interface PoolsResult {
   /** max(avg) - min(avg) across pools. */
   averageSpread: number;
   swapsApplied: number;
+  /** Random swaps of equal / near-equal players made after balancing (see `tolerance`). */
+  shuffles: number;
+}
+
+export interface PoolOptions {
+  /**
+   * Players whose skill differs by at most this much may be swapped between pools at random after
+   * balancing, as long as the spread of pool averages stays within `tolerance / smallest pool size`
+   * of the balanced result. 0 = only exact ties are shuffled. Default 0.
+   */
+  tolerance?: number;
 }
 
 export const MIN_POOL_SIZE = 6;
@@ -21,8 +32,11 @@ export const MIN_POOL_SIZE = 6;
  *     snake-drafted into pools.
  *  3. A deterministic hill-climb swaps players between pools while it reduces the variance of
  *     pool average skill. Sizes never change during swaps.
+ *  4. Seeded random swaps between players of equal (or, with `tolerance`, close) skill, so a new
+ *     seed gives a different but equally balanced assignment.
+ * The same seed always gives the same pools.
  */
-export function makePools(players: SkilledPlayer[], poolCount: number, seed: number): PoolsResult {
+export function makePools(players: SkilledPlayer[], poolCount: number, seed: number, opts: PoolOptions = {}): PoolsResult {
   const n = players.length;
   if (!Number.isInteger(poolCount) || poolCount < 1) throw invalid('bad_pool_count', 'Pool count must be at least 1.');
   if (n < MIN_POOL_SIZE * poolCount) {
@@ -72,6 +86,27 @@ export function makePools(players: SkilledPlayer[], poolCount: number, seed: num
     current = best.c;
     swaps++;
   }
+  const spreadOf = () => {
+    const avgs = pools.map(avg);
+    return Math.max(...avgs) - Math.min(...avgs);
+  };
+  const tolerance = Math.max(0, opts.tolerance ?? 0);
+  const bound = spreadOf() + tolerance / Math.min(...sizes) + 1e-9;
+  const rng = createRng(seed ^ 0x5bd1e995);
+  let shuffles = 0;
+  if (poolCount > 1) {
+    for (let it = 0; it < 60 * n; it++) {
+      const i = Math.floor(rng() * poolCount);
+      let j = Math.floor(rng() * (poolCount - 1));
+      if (j >= i) j++;
+      const a = Math.floor(rng() * pools[i].length);
+      const b = Math.floor(rng() * pools[j].length);
+      if (Math.abs(pools[i][a].skill - pools[j][b].skill) > tolerance + 1e-9) continue;
+      [pools[i][a], pools[j][b]] = [pools[j][b], pools[i][a]];
+      if (spreadOf() <= bound) shuffles++;
+      else [pools[i][a], pools[j][b]] = [pools[j][b], pools[i][a]];
+    }
+  }
   const out = pools.map((pl) => pl.slice().sort((a, b) => b.skill - a.skill || tieKey(a.id, seed) - tieKey(b.id, seed)));
   const averages = out.map(avg);
   return {
@@ -81,6 +116,7 @@ export function makePools(players: SkilledPlayer[], poolCount: number, seed: num
     totals: out.map((pl) => pl.reduce((s, x) => s + x.skill, 0)),
     averageSpread: Math.max(...averages) - Math.min(...averages),
     swapsApplied: swaps,
+    shuffles,
   };
 }
 
