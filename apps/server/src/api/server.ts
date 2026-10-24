@@ -54,7 +54,8 @@ export interface ServerOptions {
 
 export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: false, trustProxy: ctx.env.TRUST_PROXY, bodyLimit: 256 * 1024 });
-  const origins = [ctx.env.WEB_URL, ...(ctx.env.NODE_ENV !== 'production' ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173'] : [])];
+  // Browsers send only the origin (scheme + host), never the GitHub Pages path in WEB_URL.
+  const origins = [new URL(ctx.env.WEB_URL).origin, ...(ctx.env.NODE_ENV !== 'production' ? ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:4173'] : [])];
   await app.register(cors, { origin: origins, credentials: false, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key'], maxAge: 600 });
   await app.register(rateLimit, {
     max: ctx.env.NODE_ENV === 'test' ? 100000 : 300,

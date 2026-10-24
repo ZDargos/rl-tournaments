@@ -90,4 +90,10 @@ describe('Discord OAuth', () => {
     const evil = await s.app.inject({ method: 'OPTIONS', url: '/api/meta', headers: { origin: 'https://evil.example', 'access-control-request-method': 'GET' } });
     expect(evil.headers['access-control-allow-origin']).toBeUndefined();
   });
+
+  it('allows CORS from a GitHub Pages project site whose WEB_URL has a path', async () => {
+    const s = await setup({ env: { NODE_ENV: 'production', DEV_LOGIN: 'false', WEB_URL: 'https://user.github.io/rl-tournaments' } });
+    const r = await s.app.inject({ method: 'OPTIONS', url: '/api/meta', headers: { origin: 'https://user.github.io', 'access-control-request-method': 'GET' } });
+    expect(r.headers['access-control-allow-origin']).toBe('https://user.github.io');
+  });
 });
