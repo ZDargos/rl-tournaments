@@ -1,6 +1,8 @@
 import { FORMAT_LABELS, FORMATS, NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type TournamentConfig } from '@rl/core';
 import { Check, Field } from './ui';
 import { isoToLocalInput, localInputToIso, TIMEZONES } from '../lib/format';
+import { RoundsPreview } from './sixmansRounds';
+import { useState } from 'react';
 
 type Cfg = TournamentConfig;
 type Set = (fn: (c: Cfg) => void) => void;
@@ -13,7 +15,8 @@ const parseList = (s: string) => s.split(/[,\s]+/).filter(Boolean).map(Number).f
  * Settings editor shared by the create wizard, the manage page and the preset editor.
  * `locked` disables structural settings once a tournament has started (the server enforces it too).
  */
-export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', channels = [] }: { cfg: Cfg; onChange: (c: Cfg) => void; locked?: boolean; sections?: 'all' | 'basic'; channels?: { id: string; name: string; type: string }[] }) {
+export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', channels = [], playerCount }: { cfg: Cfg; onChange: (c: Cfg) => void; locked?: boolean; sections?: 'all' | 'basic'; channels?: { id: string; name: string; type: string }[]; playerCount?: number }) {
+  const [previewPlayers, setPreviewPlayers] = useState<number | null>(null);
   const set: Set = (fn) => {
     const c = structuredClone(cfg);
     fn(c);
@@ -109,12 +112,33 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
       {six && (
         <section>
           <h3>6mans</h3>
+          {cfg.sixmans.roundsMode === 'equal_games' && (() => {
+            const players = previewPlayers ?? (playerCount && playerCount >= 6 ? playerCount : cfg.registration.capacity ?? 16);
+            return (
+              <div className="stack" style={{ marginBottom: 10 }}>
+                <label className="row small muted">Preview for <input type="number" min={6} max={1024} value={players} onChange={(e) => setPreviewPlayers(num(e.target.value, 6))} style={{ width: 80 }} /> players{playerCount != null ? ` (${playerCount} confirmed now)` : ''}</label>
+                <RoundsPreview players={players} poolCount={cfg.sixmans.poolCount} matchesPerRound={cfg.sixmans.matchesPerRound} games={cfg.sixmans.gamesPerPlayer} />
+              </div>
+            );
+          })()}
           <div className="form-grid">
             <Field label="Pools"><input type="number" min={1} max={32} value={cfg.sixmans.poolCount} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.poolCount = num(e.target.value, 1)!))} /></Field>
             <Field label="Pool shuffle range" hint="Make pools may swap players this close in skill (4 = one rank, 1 = one division). 0 = only identical ranks.">
               <input type="number" min={0} max={20} step={1} value={cfg.sixmans.poolShuffleTolerance} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.poolShuffleTolerance = num(e.target.value, 0)!))} />
             </Field>
-            <Field label="Rounds per pool" hint="One 3v3 match per round per pool by default."><input type="number" min={1} max={60} value={cfg.sixmans.roundsPerPool} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.roundsPerPool = num(e.target.value, 1)!))} /></Field>
+            <Field label="Rounds">
+              <select value={cfg.sixmans.roundsMode} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.roundsMode = e.target.value as 'equal_games'))}>
+                <option value="equal_games">Automatic: everyone plays the same number of games</option>
+                <option value="fixed">Fixed number of rounds per pool</option>
+              </select>
+            </Field>
+            {cfg.sixmans.roundsMode === 'fixed' ? (
+              <Field label="Rounds per pool" hint="Every pool plays this many rounds. Games per player can then differ by one."><input type="number" min={1} max={60} value={cfg.sixmans.roundsPerPool} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.roundsPerPool = num(e.target.value, 1)!))} /></Field>
+            ) : (
+              <Field label="Games per player" hint="Empty = automatic (at least 3). Rounded up if the pools can't split it evenly.">
+                <input type="number" min={1} max={60} placeholder="Auto" value={cfg.sixmans.gamesPerPlayer ?? ''} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.gamesPerPlayer = num(e.target.value)))} />
+              </Field>
+            )}
             <Field label="Matches per round per pool"><input type="number" min={1} max={5} value={cfg.sixmans.matchesPerRound} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.matchesPerRound = num(e.target.value, 1)!))} /></Field>
             <Field label="Skill input">
               <select value={cfg.sixmans.skillMethod} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.skillMethod = e.target.value as 'rank' | 'manual_seed'))}>

@@ -145,7 +145,7 @@ function Overview({ d, reload }: { d: any; reload: () => void }) {
             <dt>Start</dt><dd>{t.startAt ? `${fmtDate(t.startAt)} · ${fmtDate(t.startAt, t.timezone)} ${t.timezone}` : 'Not scheduled'}</dd>
             {t.config.checkIn.enabled && <><dt>Check-in</dt><dd>Opens {t.config.checkIn.opensMinutesBefore} min before start, closes {t.config.checkIn.closesMinutesBefore} min before</dd></>}
             <dt>Results</dt><dd>{{ opponent_confirm: 'Reported by one team, confirmed by the other', single_report: 'One report completes a match', admin_only: 'Entered by organizers' }[t.config.results.confirmation as string]}</dd>
-            {t.format === 'sixmans' && <><dt>6mans</dt><dd>{t.config.sixmans.poolCount} pools · {t.config.sixmans.roundsPerPool} rounds · win {t.config.sixmans.scoring.win} pts · no repeated trios</dd></>}
+            {t.format === 'sixmans' && <><dt>6mans</dt><dd>{t.config.sixmans.poolCount} pools · {t.config.sixmans.roundsMode === 'fixed' ? `${t.config.sixmans.roundsPerPool} rounds` : 'equal games for everyone'} · win {t.config.sixmans.scoring.win} pts · no repeated trios</dd></>}
           </dl>
         </div>
       </div>

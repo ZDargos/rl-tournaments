@@ -80,7 +80,7 @@ export async function checkStart(ctx: AppContext, t: LoadedTournament): Promise<
       const data = JSON.parse(schedule.data) as SchedulePlanData;
       for (const p of data.pools) {
         if (p.result.status !== 'ok') problems.push(`Pool ${p.poolIndex + 1}: no valid schedule.`);
-        const v = validateSchedule(p.result, p.playerIds, { matchesPerRound: data.matchesPerRound, rounds: data.rounds, maxSpread: p.result.balance.spread });
+        const v = validateSchedule(p.result, p.playerIds, { matchesPerRound: data.matchesPerRound, rounds: p.rounds ?? data.rounds, maxSpread: p.result.balance.spread });
         if (!v.valid) problems.push(...v.errors.map((e) => `Pool ${p.poolIndex + 1}: ${e}`));
       }
     }
@@ -113,11 +113,19 @@ export async function checkStart(ctx: AppContext, t: LoadedTournament): Promise<
 // ---------------------------------------------------------------------------------------------
 
 export interface SchedulePlanData {
+  /** Most rounds any pool plays (pools can differ; see pools[].rounds). */
   rounds: number;
+  /** How rounds were chosen (absent on plans made before per-pool rounds existed = fixed). */
+  mode?: 'equal_games' | 'fixed';
+  /** Games every player plays (equal_games mode). */
+  games?: number | null;
+  /** Things the organizer should know about this plan (rounding, uneven pools, long group stage). */
+  notes?: string[];
   matchesPerRound: number;
   skillBalanced: boolean;
   seed: number;
-  pools: { poolId: number; poolIndex: number; playerIds: string[]; result: import('@rl/core').ScheduleResult }[];
+  /** `rounds` per pool; absent on older plans, where every pool played data.rounds. */
+  pools: { poolId: number; poolIndex: number; rounds?: number; playerIds: string[]; result: import('@rl/core').ScheduleResult }[];
 }
 
 function insertCompetitor(ctx: AppContext, t: LoadedTournament, c: { entryId: number | null; kind: CompetitorRow['kind']; stage: CompetitorRow['stage']; name: string; seed: number | null; members: { userId: string; role: string }[] }): number {

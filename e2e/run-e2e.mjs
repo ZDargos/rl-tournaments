@@ -202,12 +202,13 @@ async function main() {
 
   step('6mans: organizer runs pools, schedule and finals in the website');
   const orgToken = await org.evaluate(() => localStorage.getItem('rlt.session'));
-  const six = await http(orgToken, 'POST', '/api/tournaments', { guildId: GUILD, name: 'E2E 6mans', config: { format: 'sixmans', sixmans: { poolCount: 2, roundsPerPool: 4 } } });
+  const six = await http(orgToken, 'POST', '/api/tournaments', { guildId: GUILD, name: 'E2E 6mans', config: { format: 'sixmans', sixmans: { poolCount: 2 } } });
   await http(orgToken, 'POST', `/api/tournaments/${six.id}/actions/publish`, {});
   await http(orgToken, 'POST', `/api/tournaments/${six.id}/actions/open_registration`, {});
-  const RANKS = ['supersonic_legend', 'grand_champion_2', 'champion_3', 'champion_1', 'diamond_3', 'diamond_1', 'platinum_3', 'platinum_1', 'gold_3', 'gold_1', 'silver_3', 'silver_1'];
+  const RANKS = ['supersonic_legend', 'grand_champion_2', 'champion_3', 'champion_1', 'diamond_3', 'diamond_1', 'platinum_3', 'platinum_1', 'gold_3', 'gold_1', 'silver_3', 'silver_1', 'bronze_3'];
   const sixTokens = new Map();
-  for (let i = 0; i < 12; i++) {
+  // 13 players: pools of 7 and 6, so the automatic rounds give the pools different round counts.
+  for (let i = 0; i < 13; i++) {
     const tok = await devToken(i, `Six${i + 1}`);
     sixTokens.set(String(100000000000000500n + BigInt(i)), tok);
     await http(tok, 'POST', `/api/tournaments/${six.id}/register`, { rank: RANKS[i] });
@@ -220,7 +221,9 @@ async function main() {
   await org.getByRole('button', { name: 'Confirm schedule' }).click();
   await org.getByText('confirmed').nth(1).waitFor();
   let sd = await apiAs(org, `/api/tournaments/${six.id}`);
-  check(sd.sixmans.pools.status === 'confirmed' && sd.sixmans.pools.data.pools.length === 2 && sd.sixmans.pools.data.pools.every((p) => p.players.length === 6) && sd.sixmans.schedule?.status === 'confirmed', 'two pools of 6 and the schedule made and confirmed in the UI');
+  check(sd.sixmans.pools.status === 'confirmed' && sd.sixmans.pools.data.pools.length === 2 && JSON.stringify(sd.sixmans.pools.data.pools.map((p) => p.players.length)) === '[7,6]' && sd.sixmans.schedule?.status === 'confirmed', 'pools of 7 and 6 and the schedule made and confirmed in the UI');
+  const sp = sd.sixmans.schedule.data.pools;
+  check(JSON.stringify(sp.map((p) => p.result.rounds.length)) === '[7,6]' && sp.every((p) => Object.values(p.result.appearances).every((g) => g === 6)), 'automatic rounds: 7 and 6 rounds, everyone plays 6 games');
   await org.getByRole('tab', { name: 'Control' }).click();
   if (await org.getByRole('button', { name: 'Close registration' }).isVisible()) {
     await org.getByRole('button', { name: 'Close registration' }).click();
@@ -229,7 +232,7 @@ async function main() {
   await org.getByRole('button', { name: 'Start tournament' }).click();
   await org.getByRole('button', { name: 'Confirm', exact: true }).click();
   await org.getByText('In progress').first().waitFor();
-  for (let guard = 0; guard < 20; guard++) {
+  for (let guard = 0; guard < 30; guard++) {
     sd = await apiAs(org, `/api/tournaments/${six.id}`);
     const m = sd.matches.find((x) => x.status === 'ready' && x.stage === 'group');
     if (!m) break;
@@ -241,7 +244,7 @@ async function main() {
   const seen = new Set();
   let repeat = false;
   for (const [pool, a, b] of trios) for (const side of [a, b]) { const k = `${pool}:${side.players.map((p) => p.userId).sort().join(',')}`; if (seen.has(k)) repeat = true; seen.add(k); }
-  check(sd.matches.filter((m) => m.stage === 'group').length === 8 && !repeat, '8 group matches played, no trio repeated within a pool');
+  check(sd.matches.filter((m) => m.stage === 'group').length === 13 && !repeat, '13 group matches played, no trio repeated within a pool');
   await org.reload();
   await org.getByRole('tab', { name: '6mans' }).click();
   await org.getByRole('button', { name: 'Start finals' }).click();

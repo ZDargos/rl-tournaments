@@ -163,6 +163,14 @@ export const configSchema = z.object({
        * rank, 1 per division), keeping pools balanced. 0 = only identical skill values are swapped.
        */
       poolShuffleTolerance: z.number().min(0).max(20).default(2),
+      /**
+       * equal_games: each pool plays as many rounds as needed for everyone (in every pool) to play the
+       * same number of games; a bigger pool plays more rounds. fixed: every pool plays roundsPerPool.
+       */
+      roundsMode: z.enum(['equal_games', 'fixed']).default('equal_games'),
+      /** equal_games: games per player wanted; null = as few as possible. Rounded up to a valid amount. */
+      gamesPerPlayer: z.number().int().min(1).max(60).nullable().default(null),
+      /** fixed mode: rounds every pool plays. */
       roundsPerPool: z.number().int().min(1).max(60).default(4),
       matchesPerRound: z.number().int().min(1).max(5).default(1),
       skillBalancedTeams: z.boolean().default(true),

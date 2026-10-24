@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { ErrorBox, Field, useToast } from '../components/ui';
 import { SixmansStandings } from '../components/standings';
+import { RoundsPreview } from '../components/sixmansRounds';
 
 /** Organizer workflow for 6mans: pools -> schedule -> start -> finals. */
 export function SixmansAdmin({ d, reload }: { d: any; reload: () => void }) {
@@ -89,6 +90,9 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
   const toast = useToast();
   const { busy, error, run } = useAsync();
   const [rounds, setRounds] = useState<number>(t.config.sixmans.roundsPerPool);
+  const [mode, setMode] = useState<'equal_games' | 'fixed'>(t.config.sixmans.roundsMode ?? 'equal_games');
+  const [games, setGames] = useState<number | null>(t.config.sixmans.gamesPerPlayer ?? null);
+  const poolSizes: number[] = sm.pools?.data.pools.map((p: any) => p.players.length) ?? [];
   const [balanced, setBalanced] = useState<boolean>(t.config.sixmans.skillBalancedTeams);
   const [swap, setSwap] = useState<{ pool: number; round: number; a: string; b: string }>({ pool: 0, round: 1, a: '', b: '' });
   const plan = sm.schedule?.data;
@@ -99,14 +103,24 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
       <div className="card-head">
         <h3>2. Group-stage schedule {confirmed && <span className="badge green">confirmed</span>}</h3>
         <div className="row">
-          <label className="row small muted">Rounds <input type="number" min={1} max={60} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} style={{ width: 70 }} /></label>
+          <select aria-label="Rounds mode" value={mode} onChange={(e) => setMode(e.target.value as 'equal_games')}>
+            <option value="equal_games">Equal games for everyone</option>
+            <option value="fixed">Fixed rounds</option>
+          </select>
+          {mode === 'fixed'
+            ? <label className="row small muted">Rounds <input type="number" min={1} max={60} value={rounds} onChange={(e) => setRounds(Number(e.target.value))} style={{ width: 70 }} /></label>
+            : <label className="row small muted">Games each <input type="number" min={1} max={60} placeholder="Auto" value={games ?? ''} onChange={(e) => setGames(e.target.value === '' ? null : Number(e.target.value))} style={{ width: 70 }} /></label>}
           <label className="check small"><input type="checkbox" checked={balanced} onChange={(e) => setBalanced(e.target.checked)} /> Skill-balanced</label>
-          <button className="btn" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule`, { body: { rounds, skillBalanced: balanced } }))) reload(); }}>{busy ? 'Searching…' : plan ? 'Regenerate' : 'Generate schedule'}</button>
+          <button className="btn" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule`, { body: mode === 'fixed' ? { mode, rounds, skillBalanced: balanced } : { mode, games, skillBalanced: balanced } }))) reload(); }}>{busy ? 'Searching…' : plan ? 'Regenerate' : 'Generate schedule'}</button>
           {plan && !confirmed && plan.pools.every((p: any) => p.result.status === 'ok') && (
             <button className="btn primary" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule/confirm`, { body: {} }))) { toast('Schedule confirmed'); reload(); } }}>Confirm schedule</button>
           )}
         </div>
       </div>
+      {mode === 'equal_games' && poolSizes.length > 0 && !plan && (
+        <RoundsPreview players={poolSizes.reduce((a, b) => a + b, 0)} poolCount={poolSizes.length} matchesPerRound={t.config.sixmans.matchesPerRound} games={games} />
+      )}
+      {plan?.notes?.length > 0 && <div className="alert info small">{plan.notes.map((x: string) => <div key={x}>{x}</div>)}</div>}
       <p className="muted small">One 3v3 match per round per pool. The scheduler guarantees no trio of teammates repeats in a pool, balances how often each player plays, and (optionally) balances team skill. Every schedule is re-checked by an independent validator.</p>
       <ErrorBox error={error} />
       {plan?.pools.map((p: any) => {
@@ -123,9 +137,9 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
         return (
           <div key={p.poolId} style={{ marginTop: 16 }}>
             <div className="row between">
-              <h4 style={{ margin: 0 }}>{poolName}</h4>
+              <h4 style={{ margin: 0 }}>{poolName} · {p.playerIds.length} players · {r.rounds.length} rounds</h4>
               <span className="small muted">
-                Games per player {r.balance.min}–{r.balance.max} {r.balance.ideal ? '(ideal)' : r.balance.provenBest ? '(best possible, proven)' : '(best found)'} · skill diff total {r.skill.totalDiff.toFixed?.(0) ?? r.skill.totalDiff} (best found) · no repeated trios ✓
+                {r.balance.min === r.balance.max ? `${r.balance.min} games per player (equal)` : <>Games per player {r.balance.min}–{r.balance.max} {r.balance.ideal ? '(ideal)' : r.balance.provenBest ? '(best possible, proven)' : '(best found)'}</>} · skill diff total {r.skill.totalDiff.toFixed?.(0) ?? r.skill.totalDiff} (best found) · no repeated trios ✓
               </span>
             </div>
             <div className="grid auto" style={{ marginTop: 8 }}>
@@ -151,7 +165,7 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
           <summary>Manual adjustment: swap two players within a round</summary>
           <div className="form-grid" style={{ marginTop: 10 }}>
             <Field label="Pool"><select value={swap.pool} onChange={(e) => setSwap({ ...swap, pool: Number(e.target.value), a: '', b: '' })}>{plan.pools.map((p: any) => <option key={p.poolIndex} value={p.poolIndex}>Pool {String.fromCharCode(65 + p.poolIndex)}</option>)}</select></Field>
-            <Field label="Round"><input type="number" min={1} max={plan.rounds} value={swap.round} onChange={(e) => setSwap({ ...swap, round: Number(e.target.value) })} /></Field>
+            <Field label="Round"><input type="number" min={1} max={plan.pools.find((p: any) => p.poolIndex === swap.pool)?.rounds ?? plan.rounds} value={swap.round} onChange={(e) => setSwap({ ...swap, round: Number(e.target.value) })} /></Field>
             {(['a', 'b'] as const).map((k) => (
               <Field key={k} label={k === 'a' ? 'Player' : 'Swap with'}>
                 <select value={swap[k]} onChange={(e) => setSwap({ ...swap, [k]: e.target.value })}>
