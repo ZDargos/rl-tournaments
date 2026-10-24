@@ -1,0 +1,45 @@
+# Builds the website and publishes it to GitHub Pages.
+# One-time setup: Settings -> Pages -> Source: "GitHub Actions";
+# Settings -> Secrets and variables -> Actions -> Variables -> New variable VITE_API_URL = your public API URL.
+# Until it is set the site still deploys and shows a 'not connected to a server yet' notice.
+# VITE_API_URL is a public address, not a secret: it ends up in the browser bundle by design.
+name: Deploy website
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Check VITE_API_URL is set
+        run: |
+          if [ -z "${{ vars.VITE_API_URL }}" ]; then echo "::warning::VITE_API_URL is not set, so the site will show 'not connected to a tournament server yet'. Set it under Settings -> Secrets and variables -> Actions -> Variables, then re-run this workflow."; fi
+      - run: npm run build -w @rl/web
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

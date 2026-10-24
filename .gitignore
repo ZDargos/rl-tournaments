@@ -1,0 +1,15 @@
+node_modules/
+dist/
+data/
+backups/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+coverage/
+e2e/artifacts/
+*.log
+.DS_Store
+e2e/*.png

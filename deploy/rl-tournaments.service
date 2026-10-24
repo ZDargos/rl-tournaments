@@ -1,0 +1,24 @@
+# systemd unit for Linux (Raspberry Pi, old laptop, Oracle Always Free VM, ...).
+# Install: sudo cp deploy/rl-tournaments.service /etc/systemd/system/ && edit User/WorkingDirectory,
+# then: sudo systemctl daemon-reload && sudo systemctl enable --now rl-tournaments
+[Unit]
+Description=RL Tournaments (API + Discord bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rlt
+WorkingDirectory=/opt/rl-tournaments
+ExecStart=/usr/bin/node --env-file=/opt/rl-tournaments/.env apps/server/dist/index.js
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/rl-tournaments/data /opt/rl-tournaments/backups
+
+[Install]
+WantedBy=multi-user.target
