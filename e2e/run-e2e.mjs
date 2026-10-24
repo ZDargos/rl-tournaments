@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
@@ -75,7 +75,8 @@ async function main() {
     NODE_ENV: 'development', PORT: '8787', DATABASE_PATH: join(tmp, 'e2e.db'), BACKUP_DIR: join(tmp, 'backups'),
     DISCORD_DISABLED: 'true', DEV_LOGIN: 'true', WEB_URL: WEB, PUBLIC_API_URL: API, JOB_INTERVAL_SECONDS: '2', LOG_LEVEL: 'warn',
   });
-  start('node', [join(root, 'apps/web/node_modules/vite/bin/vite.js'), 'preview', '--port', '4173', '--strictPort'], {}, join(root, 'apps/web'));
+  const viteBin = join(dirname(require.resolve('vite/package.json', { paths: [join(root, 'apps/web')] })), 'bin/vite.js');
+  start('node', [viteBin, 'preview', '--port', '4173', '--strictPort'], {}, join(root, 'apps/web'));
   await waitFor(`${API}/health`);
   await waitFor(WEB);
 

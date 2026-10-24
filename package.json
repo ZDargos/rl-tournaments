@@ -4,7 +4,7 @@
   "type": "module",
   "version": "1.0.0",
   "description": "Rocket League tournament platform: website + Discord bot + 6mans engine, built to run for $0.",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "workspaces": ["packages/core", "apps/server", "apps/web"],
   "engines": { "node": ">=22.12" },
   "scripts": {
