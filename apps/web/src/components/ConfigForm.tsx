@@ -10,6 +10,8 @@ type Set = (fn: (c: Cfg) => void) => void;
 
 const num = (v: string, fallback: number | null = null) => (v === '' ? fallback : Number(v));
 const listText = (xs: number[]) => xs.join(', ');
+// A server that has not been updated yet still sends start reminders in minutes.
+const reminderHours = (cfg: Cfg) => cfg.notifications.startReminderHours ?? ((cfg.notifications as { startReminders?: number[] }).startReminders ?? []).map((m) => Math.round((m / 60) * 10000) / 10000);
 const parseList = (s: string) => s.split(/[,\s]+/).filter(Boolean).map(Number).filter((n) => Number.isFinite(n) && n >= 0);
 
 /**
@@ -285,7 +287,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
                   <input value={cfg.notifications.announcementChannelId ?? ''} placeholder="e.g. 123456789012345678" onChange={(e) => set((c) => void (c.notifications.announcementChannelId = e.target.value.trim() || null))} />
                 )}
               </Field>
-              <Field help={HELP.startReminderHours} label="Start reminders (hours before)" hint="e.g. 48, 24, 1 (0.5 = 30 minutes)"><input defaultValue={listText(cfg.notifications.startReminderHours)} onBlur={(e) => set((c) => void (c.notifications.startReminderHours = parseList(e.target.value)))} /></Field>
+              <Field help={HELP.startReminderHours} label="Start reminders (hours before)" hint="e.g. 48, 24, 1 (0.5 = 30 minutes)"><input defaultValue={listText(reminderHours(cfg))} onBlur={(e) => set((c) => void (c.notifications.startReminderHours = parseList(e.target.value)))} /></Field>
               <Field help={HELP.checkInReminders} label="Check-in reminders (min before close)"><input defaultValue={listText(cfg.notifications.checkInReminders)} onBlur={(e) => set((c) => void (c.notifications.checkInReminders = parseList(e.target.value)))} /></Field>
               <Field help={HELP.matchReminders} label="Unreported match reminders (min after ready)"><input defaultValue={listText(cfg.notifications.matchReminders)} onBlur={(e) => set((c) => void (c.notifications.matchReminders = parseList(e.target.value)))} /></Field>
             </div>
