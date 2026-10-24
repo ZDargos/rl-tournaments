@@ -68,3 +68,11 @@ Bot DMs only reach members who allow DMs from server members (Discord privacy se
 - **When a DM is rejected:** the player is marked unreachable for a while and organizers see this on the Control tab.
 - **Channel announcements still work.**
 - **Player opt-out:** players can turn DMs off with `/notify dms` or on the website.
+
+## Score reporting in Discord and the between-games lobby
+
+Both are per-tournament settings (website: tournament settings, or the commands below) and can be changed while a tournament is running.
+
+- **Score report channel:** `/tourney score-channel tournament:<t> channel:#scores`. Each live match gets a card in that channel that pings its players and has one button per team. Players tap the team that won. By default the result counts after **2 matching votes including at least one from each team**, so one team cannot record its own win alone (`votes:` and `both_teams:` change this). If both teams have enough votes for different winners the match is marked disputed and organizers are alerted. Results from votes record the winner only (no goal scores). The bot needs View Channel and Send Messages in that channel. `off:true` turns it off.
+- **Between-games lobby:** `/voice lobby tournament:<t> channel:<voice channel> seconds:30`. When a match ends, its players are moved from the team channels to the lobby. Their next match's channels are created once the timer (minimum 1 second) runs out and connected players are moved in. The bot needs Connect and Move Members on the lobby channel.
+- **Hand-picked 6mans finals:** on the website (Finals setup, "Hand-pick teams") or `/sixmans finals-teams tournament:<t> teams:@a @b @c | @d @e @f`. Any group-stage player can be picked; the first team is the top seed.

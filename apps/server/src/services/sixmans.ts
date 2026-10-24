@@ -1,6 +1,6 @@
 import {
   buildFinalsBracket, computeSixmansStandings, computeSkills, conflict, crossPoolOrder, defaultQualifiersPerPool, finalsOptions, formFinalsTeams, invalid,
-  isPreStart, makePools, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
+  handPickedOption, isPreStart, makePools, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
   type FinalsOption, type FinalsTeam, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
 } from '@rl/core';
 import type { AppContext, Source } from './context.js';
@@ -10,6 +10,7 @@ import { audit } from './audit.js';
 import { enqueue } from './notifications.js';
 import { matchesOf, type MatchRow } from './queries.js';
 import { entriesOf } from './registration.js';
+import { randomInt } from 'node:crypto';
 import { sha256 } from '../lib/util.js';
 import { userNames } from './users.js';
 import { insertMatch, notifyNewlyReady, syncBracket, type SchedulePlanData } from './engine.js';
@@ -103,8 +104,10 @@ export async function makePoolsProposal(ctx: AppContext, actorId: string, id: nu
     t = await updateTournament(ctx, actorId, id, { configPatch: { sixmans: { poolCount } } }, source);
   }
   const skills = confirmedSkills(ctx, t);
-  const seed = t.cfg.seeding.seed;
-  const res = makePools(skills, t.cfg.sixmans.poolCount, seed);
+  // A fresh seed every time, so "Remake pools" can trade equal / near-equal players between pools.
+  // The seed is stored with the proposal, so any proposal can be reproduced exactly.
+  const seed = freshSeed();
+  const res = makePools(skills, t.cfg.sixmans.poolCount, seed, { tolerance: t.cfg.sixmans.poolShuffleTolerance });
   const byId = new Map(skills.map((s) => [s.id, s]));
   const data: PoolsPlanData = {
     poolCount: t.cfg.sixmans.poolCount,
@@ -179,6 +182,11 @@ export async function confirmPools(ctx: AppContext, actorId: string, id: number,
   return data;
 }
 
+/** Random seed for a new proposal (regenerating should give a different, equally valid result). */
+export function freshSeed(): number {
+  return randomInt(0, 2 ** 31);
+}
+
 function poolsWithMembers(ctx: AppContext, tournamentId: number) {
   const pools = ctx.db.prepare('SELECT * FROM pools WHERE tournament_id = ? ORDER BY idx').all(tournamentId) as { id: number; idx: number; name: string }[];
   return pools.map((p) => ({
@@ -201,14 +209,15 @@ export async function generateSchedule(ctx: AppContext, actorId: string, id: num
     t = await updateTournament(ctx, actorId, id, { configPatch: { sixmans: patch } }, source);
   }
   const s = t.cfg.sixmans;
-  const data: SchedulePlanData = { rounds: s.roundsPerPool, matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed: t.cfg.seeding.seed, pools: [] };
+  const seed = freshSeed();
+  const data: SchedulePlanData = { rounds: s.roundsPerPool, matchesPerRound: s.matchesPerRound, skillBalanced: s.skillBalancedTeams, seed, pools: [] };
   for (const p of poolsWithMembers(ctx, t.id)) {
     const result = scheduleGroupStage({
       players: p.members.map((m) => ({ id: m.user_id, skill: m.skill })),
       rounds: s.roundsPerPool,
       matchesPerRound: s.matchesPerRound,
       skillBalanced: s.skillBalancedTeams,
-      seed: t.cfg.seeding.seed + p.idx,
+      seed: seed + p.idx,
       timeLimitMs: s.schedulerTimeLimitMs,
     });
     if (result.status === 'ok') {
@@ -362,12 +371,24 @@ export async function previewFinals(ctx: AppContext, actorId: string, id: number
   });
 }
 
-/** Organizer moves players between finals teams and/or reorders team seeds. */
-export async function editFinalsTeams(ctx: AppContext, actorId: string, id: number, teams: { players: string[] }[], source: Source) {
+/**
+ * Organizer moves players between finals teams and/or reorders team seeds. With `handPicked` the
+ * organizer builds the teams from scratch out of any group-stage players (qualified or not), as
+ * many teams of three as they like; seeds follow the given order.
+ */
+export async function editFinalsTeams(ctx: AppContext, actorId: string, id: number, teams: { players: string[] }[], source: Source, opts: { handPicked?: boolean } = {}) {
   const t = await finalsManager(ctx, actorId, id);
   const plan = currentPlan(ctx, t.id, 'finals');
   if (!plan) throw notFound('Finals proposal');
   const data = JSON.parse(plan.data) as FinalsPlanData;
+  if (opts.handPicked) {
+    const groupPlayers = new Set([...data.qualified, ...data.others].map((q) => q.playerId));
+    const outsiders = teams.flatMap((tm) => tm.players).filter((u) => !groupPlayers.has(u));
+    if (outsiders.length) throw invalid('invalid_teams', `Only players from the group stage can play in the finals (${outsiders.length} other player(s) chosen).`);
+    const custom = handPickedOption(teams, data.qualified.map((q) => q.playerId));
+    data.options = [...data.options.filter((o) => o.id !== custom.id), custom];
+    data.optionId = custom.id;
+  }
   const option = data.options.find((o) => o.id === data.optionId)!;
   const problems = validateFinalsTeams(teams, option.players);
   if (problems.length) throw invalid('invalid_teams', problems.join(' '), { problems });
@@ -377,7 +398,7 @@ export async function editFinalsTeams(ctx: AppContext, actorId: string, id: numb
   data.bracket = bracketPreview(data.teams);
   tx(ctx, () => {
     savePlan(ctx, t, 'finals', 'proposed', data, plan.fingerprint, actorId);
-    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_teams_edited', details: { teams: teams.map((x) => x.players), source } });
+    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_teams_edited', details: { teams: teams.map((x) => x.players), handPicked: !!opts.handPicked, source } });
   });
   return data;
 }

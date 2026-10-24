@@ -189,13 +189,17 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
     if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams } }))) reload();
   };
   const [pick, setPick] = useState<string | null>(null);
+  const [handPick, setHandPick] = useState(false);
   return (
+    <>
+    {handPick && <HandPickTeams plan={plan} t={t} n={n} reload={reload} close={() => setHandPick(false)} />}
     <div className="card">
       <div className="card-head">
         <h3>Finals setup</h3>
         <div className="row">
           <label className="row small muted">Qualifiers per pool <input type="number" min={1} value={perPool} onChange={(e) => setPerPool(Number(e.target.value))} style={{ width: 70 }} /></label>
           <button className="btn small" onClick={() => preview(null, perPool)} disabled={busy}>Recalculate</button>
+          <button className="btn small" onClick={() => setHandPick(true)} disabled={busy || handPick}>Hand-pick teams</button>
           <button className="btn primary" disabled={busy || plan.teams.some((tm: any) => tm.players.length !== 3)} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/start`, { body: {} }))) { toast('Finals started!'); reload(); } }}>Start finals</button>
         </div>
       </div>
@@ -203,14 +207,15 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
       <p className="small muted">Qualified ({plan.qualified.length}): {plan.qualified.map((q: any) => `${n(q.playerId)} (P${q.poolIndex + 1} #${q.poolRank})`).join(', ')}</p>
       <h4>Structure</h4>
       <div className="stack">
-        {plan.options.map((o: any) => (
+        {plan.optionId === 'hand_picked' && <div className="alert info">Using your hand-picked teams. Choose a structure below to go back to automatic teams.</div>}
+        {plan.options.filter((o: any) => o.id !== 'hand_picked').map((o: any) => (
           <label key={o.id} className="check" style={{ alignItems: 'flex-start' }}>
             <input type="radio" name="finals-option" checked={o.id === plan.optionId} onChange={() => preview(o.id)} />
             <span><strong>{o.label}</strong> — <span className="small">{o.description}</span>{o.added.length > 0 && <span className="small team-a"> Adds: {o.added.map(n).join(', ')}.</span>}{o.removed.length > 0 && <span className="small team-b"> Drops: {o.removed.map(n).join(', ')}.</span>}</span>
           </label>
         ))}
       </div>
-      <h4 style={{ marginTop: 14 }}>Teams (balanced; click two players to swap them)</h4>
+      <h4 style={{ marginTop: 14 }}>Teams ({plan.optionId === 'hand_picked' ? 'hand-picked' : 'balanced'}; click two players to swap them)</h4>
       <div className="pool-grid">
         {plan.teams.map((tm: any, i: number) => (
           <div className="round" key={tm.key}>
@@ -232,6 +237,68 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
         const tn = (k: string | null) => (k ? plan.teams.find((x: any) => x.key === k)?.name ?? k : 'bye');
         return <div key={i}>{tn(b.a)} vs {tn(b.b)}</div>;
       })}</div>
+    </div>
+    </>
+  );
+}
+
+/** Build the finals teams by hand from any group-stage players (qualified or not). */
+function HandPickTeams({ plan, t, n, reload, close }: { plan: any; t: any; n: (u: string) => string; reload: () => void; close: () => void }) {
+  const { busy, error, run } = useAsync();
+  const toast = useToast();
+  const everyone: any[] = [...plan.qualified, ...plan.others];
+  const qualified = new Set(plan.qualified.map((q: any) => q.playerId));
+  const [count, setCount] = useState<number>(Math.max(2, plan.teams.length));
+  const [assign, setAssign] = useState<Record<string, number>>(() => Object.fromEntries(plan.teams.flatMap((tm: any, i: number) => tm.players.map((u: string) => [u, i]))));
+  const teams = Array.from({ length: count }, (_, i) => everyone.map((q) => q.playerId).filter((u) => assign[u] === i));
+  const ready = teams.every((tm) => tm.length === 3);
+  const save = async () => {
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams: teams.map((players) => ({ players })), handPicked: true } }))) {
+      toast('Finals teams saved');
+      close();
+      reload();
+    }
+  };
+  return (
+    <div className="card">
+      <div className="card-head">
+        <h3>Hand-pick finals teams</h3>
+        <div className="row">
+          <label className="row small muted">Teams <input type="number" min={2} max={Math.floor(everyone.length / 3)} value={count} onChange={(e) => setCount(Math.max(2, Number(e.target.value) || 2))} style={{ width: 60 }} /></label>
+          <button className="btn small" onClick={close} disabled={busy}>Cancel</button>
+          <button className="btn primary small" onClick={save} disabled={busy || !ready}>Use these teams</button>
+        </div>
+      </div>
+      <ErrorBox error={error} />
+      <p className="small muted">Put exactly 3 players on each team. Any group-stage player can be picked; team 1 is the top seed.</p>
+      <div className="pool-grid">
+        {teams.map((tm, i) => (
+          <div className="round" key={i}>
+            <h4>Team {i + 1} (seed {i + 1})</h4>
+            {tm.map((u) => <span key={u} className="player-pill">{n(u)}</span>)}
+            {tm.length !== 3 && <div className="tiny" style={{ color: 'var(--red)' }}>{tm.length}/3 players</div>}
+          </div>
+        ))}
+      </div>
+      <div className="table-wrap" style={{ marginTop: 10 }}>
+        <table className="table">
+          <thead><tr><th>Player</th><th>Group result</th><th>Team</th></tr></thead>
+          <tbody>
+            {everyone.map((q) => (
+              <tr key={q.playerId}>
+                <td>{n(q.playerId)}</td>
+                <td className="small">P{q.poolIndex + 1} #{q.poolRank}{qualified.has(q.playerId) ? ' · qualified' : ''}</td>
+                <td>
+                  <select aria-label={`Team for ${n(q.playerId)}`} value={(assign[q.playerId] ?? -1) < count ? assign[q.playerId] ?? -1 : -1} onChange={(e) => setAssign({ ...assign, [q.playerId]: Number(e.target.value) })}>
+                    <option value={-1}>Not playing</option>
+                    {teams.map((_, j) => <option key={j} value={j}>Team {j + 1}</option>)}
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

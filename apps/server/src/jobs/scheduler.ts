@@ -3,7 +3,8 @@ import { nowIso } from '../services/context.js';
 import { dispatchDue, enqueue, recoverProcessing } from '../services/notifications.js';
 import { autoConfirmDue } from '../services/results.js';
 import { expireInvitations } from '../services/registration.js';
-import { reconcileAll } from '../services/voice.js';
+import { reconcileAll, reconcileLobbies } from '../services/voice.js';
+import { syncAllScoreCards } from '../services/scorecards.js';
 import { cleanupAuth } from '../auth/sessions.js';
 import { loadTournament } from '../services/access.js';
 import { transition } from '../services/tournaments.js';
@@ -58,6 +59,8 @@ export class JobRunner {
       do sent = await dispatchDue(ctx, 25);
       while (sent === 25);
       if (this.ticks % 20 === 0) await reconcileAll(ctx, this.ticks % 120 === 0);
+      else await reconcileLobbies(ctx);
+      await syncAllScoreCards(ctx);
       if (this.ticks % 240 === 0) cleanupAuth(ctx);
       await this.maybeBackup();
       ctx.db.prepare("INSERT INTO job_state (name, last_run_at) VALUES ('tick', ?) ON CONFLICT(name) DO UPDATE SET last_run_at = excluded.last_run_at").run(nowIso(ctx));

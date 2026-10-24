@@ -435,3 +435,102 @@ export async function replacePlayer(ctx: AppContext, actorId: string, tournament
   });
   ctx.kick(t.id);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Discord vote cards: players vote for the winning team; enough matching votes complete the match.
+// ---------------------------------------------------------------------------------------------
+
+export interface MatchVote {
+  userId: string;
+  voterSide: 'a' | 'b';
+  winner: 'a' | 'b';
+}
+
+export interface VoteRules {
+  votesNeeded: number;
+  requireBothTeams: boolean;
+}
+
+export interface VoteTally {
+  a: number;
+  b: number;
+  /** The team the votes have decided on, if any. */
+  winner: 'a' | 'b' | null;
+  /** Both teams have enough votes for different winners: an organizer has to decide. */
+  conflict: boolean;
+}
+
+/**
+ * A team wins the vote when it has at least `votesNeeded` votes, more votes than the other team and
+ * (with `requireBothTeams`) at least one of those votes comes from each team.
+ */
+export function tallyVotes(votes: MatchVote[], rules: VoteRules): VoteTally {
+  const count = { a: 0, b: 0 };
+  const voters = { a: new Set<string>(), b: new Set<string>() };
+  for (const v of votes) {
+    count[v.winner]++;
+    voters[v.winner].add(v.voterSide);
+  }
+  const wins = (x: 'a' | 'b') => {
+    const o = x === 'a' ? 'b' : 'a';
+    return count[x] >= rules.votesNeeded && count[x] > count[o] && (!rules.requireBothTeams || voters[x].size === 2);
+  };
+  const winner = wins('a') ? 'a' : wins('b') ? 'b' : null;
+  return { ...count, winner, conflict: !winner && count.a >= rules.votesNeeded && count.b >= rules.votesNeeded };
+}
+
+export function matchVotes(ctx: AppContext, m: Pick<MatchRow, 'id' | 'result_version'>): MatchVote[] {
+  return (ctx.db.prepare('SELECT user_id, voter_side, winner FROM match_votes WHERE match_id = ? AND result_version = ? ORDER BY created_at, user_id').all(m.id, m.result_version) as {
+    user_id: string; voter_side: 'a' | 'b'; winner: 'a' | 'b';
+  }[]).map((r) => ({ userId: r.user_id, voterSide: r.voter_side, winner: r.winner }));
+}
+
+/** A player in the match votes (or changes their vote) for the team that won. */
+export async function voteResult(ctx: AppContext, actorId: string, matchId: number, winner: 'a' | 'b', source: Source) {
+  const { m, t } = load(ctx, matchId);
+  assertPlayable(t);
+  const side = sideOf(ctx, m, actorId);
+  if (!side) throw forbidden('Only the players in this match can vote on its result.');
+  if (m.status === 'disputed') throw conflict('disputed', 'The votes disagree, so an organizer will set this result.');
+  if (m.status !== 'ready' && m.status !== 'awaiting_confirmation')
+    throw conflict('not_reportable', m.status === 'completed' ? 'This match already has a result. Ask an organizer for a correction.' : `This match is ${m.status}.`);
+  if (t.cfg.results.confirmation === 'admin_only') throw forbidden('In this tournament only organizers enter results.');
+  const rules = t.cfg.scoreReports;
+  let outcome = 'counted' as 'counted' | 'unchanged' | 'completed' | 'disputed';
+  let tally: VoteTally = { a: 0, b: 0, winner: null, conflict: false };
+  tx(ctx, () => {
+    const fresh = getMatch(ctx, m.id)!;
+    if (fresh.result_version !== m.result_version || !OPEN.has(fresh.status)) throw conflict('match_changed', 'This match was updated at the same time. Try again.');
+    const prev = ctx.db.prepare('SELECT winner FROM match_votes WHERE match_id = ? AND result_version = ? AND user_id = ?').get(m.id, m.result_version, actorId) as { winner: string } | undefined;
+    if (prev?.winner === winner) outcome = 'unchanged';
+    const now = nowIso(ctx);
+    ctx.db
+      .prepare(
+        `INSERT INTO match_votes (match_id, result_version, user_id, voter_side, winner, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(match_id, result_version, user_id) DO UPDATE SET winner = excluded.winner, updated_at = excluded.updated_at`,
+      )
+      .run(m.id, m.result_version, actorId, side, winner, now, now);
+    const votes = matchVotes(ctx, m);
+    tally = tallyVotes(votes, rules);
+    if (tally.winner) {
+      const need = winsNeeded(m.best_of);
+      const result: SeriesResult = { winsA: tally.winner === 'a' ? need : 0, winsB: tally.winner === 'b' ? need : 0, winner: tally.winner, goalsA: 0, goalsB: 0, games: [] };
+      ctx.db.prepare('UPDATE result_reports SET superseded = 1 WHERE match_id = ? AND superseded = 0').run(m.id);
+      votes.filter((v) => v.winner === tally.winner).forEach((v, i) => insertReport(ctx, m, { userId: v.userId, side: v.voterSide, kind: i === 0 ? 'report' : 'confirm', result, reason: 'Discord vote', source }));
+      audit(ctx, {
+        guildId: t.guild_id, tournamentId: t.id, actorId, action: 'result.voted', target: `match:${m.id}`,
+        details: { winner: tally.winner, votes: votes.map((v) => ({ user: v.userId, side: v.voterSide, winner: v.winner })), rules, source },
+      });
+      completeMatch(ctx, t, m, result);
+      outcome = 'completed';
+    } else if (tally.conflict && fresh.status !== 'disputed') {
+      ctx.db.prepare("UPDATE matches SET status = 'disputed', updated_at = ? WHERE id = ?").run(now, m.id);
+      enqueue(ctx, { tournamentId: t.id, matchId: m.id, category: 'organizer_alert', key: `m${m.id}:vote-conflict:v${m.result_version}`, audience: 'admins', payload: { text: `The players of match ${m.id} voted for different winners (${tally.a}–${tally.b}). Set the result: ${ctx.env.WEB_URL}/#/m/${m.id}` } });
+      audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'result.disputed', target: `match:${m.id}`, details: { votes: { a: tally.a, b: tally.b }, source } });
+      outcome = 'disputed';
+    }
+    ctx.db.prepare('UPDATE tournaments SET version = version + 1, updated_at = ? WHERE id = ?').run(now, t.id);
+  });
+  ctx.kick(t.id);
+  return { outcome, tally, side, match: getMatch(ctx, m.id)! };
+}

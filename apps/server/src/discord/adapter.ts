@@ -1,5 +1,14 @@
-import { ChannelType, DiscordAPIError, OverwriteType, PermissionFlagsBits, type Client, type Guild, type GuildMember } from 'discord.js';
+import {
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, DiscordAPIError, OverwriteType, PermissionFlagsBits, type Client, type Guild, type GuildMember,
+} from 'discord.js';
 import { DiscordApiError, DiscordCodes, type BotPermissionReport, type CreateVoiceChannelInput, type DiscordMemberInfo, type DiscordPort, type MessageContent } from './port.js';
+
+const STYLE = { primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary, success: ButtonStyle.Success, danger: ButtonStyle.Danger };
+
+function components(message: MessageContent) {
+  if (!message.buttons?.length) return [];
+  return [new ActionRowBuilder<ButtonBuilder>().addComponents(message.buttons.slice(0, 5).map((b) => new ButtonBuilder().setCustomId(b.customId).setLabel(b.label.slice(0, 80)).setStyle(STYLE[b.style])))];
+}
 
 const PERMANENT_CODES = new Set<number>([DiscordCodes.UnknownChannel, DiscordCodes.UnknownMember, DiscordCodes.UnknownUser, DiscordCodes.MissingAccess, DiscordCodes.CannotDM, DiscordCodes.MissingPermissions, DiscordCodes.TargetNotInVoice]);
 
@@ -134,8 +143,15 @@ export class DiscordJsAdapter implements DiscordPort {
   async sendChannelMessage(channelId: string, message: MessageContent) {
     const ch = await call(() => this.client.channels.fetch(channelId));
     if (!ch || !ch.isSendable()) throw new DiscordApiError('Channel is not a text channel the bot can post in.', DiscordCodes.UnknownChannel, 404, true);
-    const msg = await call<{ id: string }>(() => ch.send({ content: message.content, allowedMentions: { parse: [], users: message.mentionUserIds ?? [] } }));
+    const msg = await call<{ id: string }>(() => ch.send({ content: message.content, components: components(message), allowedMentions: { parse: [], users: message.mentionUserIds ?? [] } }));
     return { id: msg.id };
+  }
+
+  async editChannelMessage(channelId: string, messageId: string, message: MessageContent) {
+    const ch = await call(() => this.client.channels.fetch(channelId));
+    if (!ch || !ch.isTextBased()) throw new DiscordApiError('Channel is not a text channel.', DiscordCodes.UnknownChannel, 404, true);
+    // Edits never ping anyone again.
+    await call(() => ch.messages.edit(messageId, { content: message.content, components: components(message), allowedMentions: { parse: [] } }));
   }
 
   async sendDM(userId: string, message: MessageContent) {

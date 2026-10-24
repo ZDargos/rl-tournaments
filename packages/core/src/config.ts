@@ -158,6 +158,11 @@ export const configSchema = z.object({
       rankValues: z.partialRecord(z.enum(RANK_IDS as [string, ...string[]]), z.number()).prefault({}),
       /** How to treat players without a seed/rank. */
       missingSkill: z.enum(['lowest', 'median']).default('lowest'),
+      /**
+       * "Make pools" may swap players whose skill differs by at most this much (rank scale: 4 per
+       * rank, 1 per division), keeping pools balanced. 0 = only identical skill values are swapped.
+       */
+      poolShuffleTolerance: z.number().min(0).max(20).default(2),
       roundsPerPool: z.number().int().min(1).max(60).default(4),
       matchesPerRound: z.number().int().min(1).max(5).default(1),
       skillBalancedTeams: z.boolean().default(true),
@@ -222,6 +227,23 @@ export const configSchema = z.object({
       /** Let all tournament participants see (not join) team channels. */
       visibleToParticipants: z.boolean().default(false),
       deleteOnComplete: z.boolean().default(true),
+      /**
+       * Voice channel players are moved into when their match ends (between-games lobby). After
+       * `lobbySeconds` the bot opens their next match's channels and moves them in. null = off.
+       */
+      lobbyChannelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      lobbySeconds: z.number().int().min(1).max(3600).default(30),
+    })
+    .prefault({}),
+  /** Score reporting from Discord: a vote card per live match, posted in a channel. */
+  scoreReports: z
+    .object({
+      /** Text channel for vote cards; null = off. */
+      channelId: z.string().regex(/^\d{5,25}$/).nullable().default(null),
+      /** Matching votes needed before the result counts. */
+      votesNeeded: z.number().int().min(1).max(6).default(2),
+      /** The votes must include at least one player from each team (so one team cannot report its own win alone). */
+      requireBothTeams: z.boolean().default(true),
     })
     .prefault({}),
 });
