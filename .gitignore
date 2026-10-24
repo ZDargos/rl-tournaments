@@ -12,3 +12,4 @@ coverage/
 e2e/artifacts/
 *.log
 .DS_Store
+e2e/*.png
