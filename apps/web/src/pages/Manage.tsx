@@ -9,6 +9,7 @@ import { HELP } from '../components/settingHelp';
 import { ConfigForm } from '../components/ConfigForm';
 import { MemberPicker } from '../components/MemberPicker';
 import { SixmansAdmin } from './SixmansAdmin';
+import { StartPollAdmin } from '../components/StartPoll';
 import { fmtDate } from '../lib/format';
 
 type Tab = 'control' | 'settings' | 'entries' | 'sixmans' | 'matches' | 'people' | 'log';
@@ -73,7 +74,7 @@ function Control({ d, reload }: { d: any; reload: () => void }) {
           <h3>Lifecycle</h3>
           <p className="muted small">Draft → Published → Registration open → Registration closed → In progress → Completed. Format and structure lock when the tournament starts.</p>
           <div className="row">
-            {m.availableActions.filter((a: string) => a !== 'cancel').map((a: TransitionAction) =>
+            {m.availableActions.filter((a: string) => a !== 'cancel' && !(a === 'open_registration' && d.startPoll?.status === 'open')).map((a: TransitionAction) =>
               a === 'start' ? (
                 <ConfirmButton key={a} className="btn primary" label={ACTION_LABEL[a]} disabled={busy || (sc && !sc.ok)} confirm={`Start now? Brackets/pairings are generated and the format becomes locked.${sc?.warnings.length ? ` Warnings: ${sc.warnings.join(' ')}` : ''}`} onConfirm={() => act(a)} />
               ) : (
@@ -85,6 +86,7 @@ function Control({ d, reload }: { d: any; reload: () => void }) {
           <ErrorBox error={error} />
           {t.autoStartError && <div className="alert error" style={{ marginTop: 10 }}>Automatic start failed: {t.autoStartError.split('|').slice(1).join('|')}</div>}
         </div>
+        <StartPollAdmin d={d} reload={reload} />
         {sc && (
           <div className="card">
             <h3>Start checklist</h3>

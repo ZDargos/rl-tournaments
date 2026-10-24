@@ -8,6 +8,7 @@ import { AvailabilityBadge, Empty, ErrorBox, Field, MatchBadge, Spinner, StateBa
 import { BracketView, MatchCard, MatchList, RoundsView } from '../components/matches';
 import { SixmansStandings, StandingsTable } from '../components/standings';
 import { MemberPicker } from '../components/MemberPicker';
+import { StartPollVote } from '../components/StartPoll';
 import { fmtDate, relTime } from '../lib/format';
 
 export function useTournament(id: string | undefined) {
@@ -113,6 +114,7 @@ function Overview({ d, reload }: { d: any; reload: () => void }) {
   return (
     <div className="grid overview">
       <div className="stack">
+        <StartPollVote d={d} reload={reload} />
         {myMatches.length > 0 && (
           <div className="card" style={{ borderColor: 'var(--orange)' }}>
             <h2>Your match{myMatches.length > 1 ? 'es' : ''}</h2>

@@ -7,7 +7,11 @@ const STYLE = { primary: ButtonStyle.Primary, secondary: ButtonStyle.Secondary, 
 
 function components(message: MessageContent) {
   if (!message.buttons?.length) return [];
-  return [new ActionRowBuilder<ButtonBuilder>().addComponents(message.buttons.slice(0, 5).map((b) => new ButtonBuilder().setCustomId(b.customId).setLabel(b.label.slice(0, 80)).setStyle(STYLE[b.style])))];
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const buttons = message.buttons.slice(0, 25);
+  for (let i = 0; i < buttons.length; i += 5)
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(buttons.slice(i, i + 5).map((b) => new ButtonBuilder().setCustomId(b.customId).setLabel(b.label.slice(0, 80)).setStyle(STYLE[b.style]))));
+  return rows;
 }
 
 const PERMANENT_CODES = new Set<number>([DiscordCodes.UnknownChannel, DiscordCodes.UnknownMember, DiscordCodes.UnknownUser, DiscordCodes.MissingAccess, DiscordCodes.CannotDM, DiscordCodes.MissingPermissions, DiscordCodes.TargetNotInVoice]);

@@ -288,6 +288,16 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
                   <input value={cfg.notifications.announcementChannelId ?? ''} placeholder="e.g. 123456789012345678" onChange={(e) => set((c) => void (c.notifications.announcementChannelId = e.target.value.trim() || null))} />
                 )}
               </Field>
+              <Field help={HELP.registrationChannel} label="Registration channel" hint="Empty = the announcement channel">
+                {textChannels.length ? (
+                  <select value={cfg.notifications.registrationChannelId ?? ''} onChange={(e) => set((c) => void (c.notifications.registrationChannelId = e.target.value || null))}>
+                    <option value="">Same as announcements</option>
+                    {textChannels.map((ch) => <option key={ch.id} value={ch.id}>#{ch.name}</option>)}
+                  </select>
+                ) : (
+                  <input value={cfg.notifications.registrationChannelId ?? ''} placeholder="e.g. 123456789012345678" onChange={(e) => set((c) => void (c.notifications.registrationChannelId = e.target.value.trim() || null))} />
+                )}
+              </Field>
               <Field help={HELP.startReminderHours} label="Start reminders (hours before)" hint="e.g. 48, 24, 1 (0.5 = 30 minutes)"><input defaultValue={listText(reminderHours(cfg))} onBlur={(e) => set((c) => void (c.notifications.startReminderHours = parseList(e.target.value)))} /></Field>
               <Field help={HELP.checkInReminders} label="Check-in reminders (min before close)"><input defaultValue={listText(cfg.notifications.checkInReminders)} onBlur={(e) => set((c) => void (c.notifications.checkInReminders = parseList(e.target.value)))} /></Field>
               <Field help={HELP.matchReminders} label="Unreported match reminders (min after ready)"><input defaultValue={listText(cfg.notifications.matchReminders)} onBlur={(e) => set((c) => void (c.notifications.matchReminders = parseList(e.target.value)))} /></Field>
@@ -295,7 +305,15 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             <div className="row" style={{ marginTop: 10, gap: 20 }}>
               <Check help={HELP.channelAnnouncements} label="Post announcements in the channel" checked={cfg.notifications.channelAnnouncements} onChange={(v) => set((c) => void (c.notifications.channelAnnouncements = v))} />
               <Check help={HELP.dms} label="Send DMs" checked={cfg.notifications.dms} onChange={(v) => set((c) => void (c.notifications.dms = v))} />
+              <Check help={HELP.clearChannelsOnEnd} label="Clear the channels when the tournament ends" checked={cfg.notifications.clearChannelsOnEnd} onChange={(v) => set((c) => void (c.notifications.clearChannelsOnEnd = v))} />
             </div>
+            {cfg.notifications.clearChannelsOnEnd && (
+              <div className="form-grid" style={{ marginTop: 10 }}>
+                <Field help={HELP.clearChannelsAfterHours} label="Clear after (hours)" hint="0 = right away">
+                  <input type="number" min={0} max={720} value={cfg.notifications.clearChannelsAfterHours} onChange={(e) => set((c) => void (c.notifications.clearChannelsAfterHours = num(e.target.value, 0)!))} />
+                </Field>
+              </div>
+            )}
             <details style={{ marginTop: 10 }}>
               <summary>Per-event delivery <Help text={HELP.perEvent} /></summary>
               <div className="table-wrap" style={{ marginTop: 8 }}>

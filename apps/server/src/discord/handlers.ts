@@ -19,6 +19,7 @@ import { discordTime, escapeDiscord } from '../lib/util.js';
 import { zonedToUtc } from '../lib/tz.js';
 import { SETTING_SUGGESTIONS } from './commands.js';
 import { setAvailability } from '../services/availability.js';
+import { pollSignup, togglePollVote } from '../services/polls.js';
 
 /** Platform-neutral view of a Discord interaction (built by bot.ts from discord.js objects). */
 export interface BotInteraction {
@@ -619,6 +620,19 @@ async function handleButton(ctx: AppContext, i: BotInteraction): Promise<BotRepl
     return reply(answer === 'confirmed'
       ? `✅ Thanks! The organizers of **${esc(t.name)}** know you can make it. Changed your mind? Tap the other button.`
       : `Got it, the organizers of **${esc(t.name)}** know you can't make it.${t.cfg.registration.allowWithdrawal ? ` If you won't play, please also withdraw so someone else can take your spot: \`/reg leave tournament:${t.id}\` in the server.` : ''}`);
+  }
+  if (kind === 'poll') {
+    const r = await togglePollVote(ctx, i.user.id, Number(a), Number(b), src);
+    const picks = r.picks.map((o) => discordTime(r.options[o], 'F'));
+    return reply(picks.length ? `🗳️ Your picks: ${picks.join(' · ')}. If one of them wins, you're registered automatically. Tap a time again to remove it.` : '🗳️ You have no picks now. Tap every time that works for you.');
+  }
+  if (kind === 'pollreg') {
+    const e = await pollSignup(ctx, i.user.id, Number(a), src);
+    return reply(e.status === 'confirmed' ? '✅ You’re registered!' : e.status === 'waitlisted' ? 'It’s full, so you’re on the waitlist.' : 'You’re signed up and waiting for an organizer to approve you.');
+  }
+  if (kind === 'pollwd') {
+    await withdraw(ctx, i.user.id, Number(a), src);
+    return reply('You’ve withdrawn. Changed your mind? Sign up again on the website or with `/reg join`.');
   }
   if (kind === 'inv') {
     await respondInvitation(ctx, i.user.id, Number(b), a === 'accept', src);

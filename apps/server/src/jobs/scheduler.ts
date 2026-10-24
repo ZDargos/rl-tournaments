@@ -6,6 +6,8 @@ import { autoConfirmDue } from '../services/results.js';
 import { expireInvitations } from '../services/registration.js';
 import { reconcileAll, reconcileLobbies } from '../services/voice.js';
 import { syncAllScoreCards } from '../services/scorecards.js';
+import { clearEndedChannels } from '../services/channels.js';
+import { closeDuePolls, syncAllPollCards } from '../services/polls.js';
 import { cleanupAuth } from '../auth/sessions.js';
 import { loadTournament } from '../services/access.js';
 import { transition } from '../services/tournaments.js';
@@ -53,6 +55,7 @@ export class JobRunner {
     const ctx = this.ctx;
     try {
       this.ticks++;
+      await closeDuePolls(ctx);
       await this.registrationWindows();
       await this.autoStarts();
       autoConfirmDue(ctx);
@@ -64,6 +67,8 @@ export class JobRunner {
       if (this.ticks % 20 === 0) await reconcileAll(ctx, this.ticks % 120 === 0);
       else await reconcileLobbies(ctx);
       await syncAllScoreCards(ctx);
+      await syncAllPollCards(ctx);
+      await clearEndedChannels(ctx);
       if (this.ticks % 240 === 0) cleanupAuth(ctx);
       await this.maybeBackup();
       ctx.db.prepare("INSERT INTO job_state (name, last_run_at) VALUES ('tick', ?) ON CONFLICT(name) DO UPDATE SET last_run_at = excluded.last_run_at").run(nowIso(ctx));
@@ -88,7 +93,10 @@ export class JobRunner {
 
   private async registrationWindows() {
     const now = nowIso(this.ctx);
-    const rows = this.ctx.db.prepare("SELECT id FROM tournaments WHERE state IN ('published','registration_open','registration_closed')").all() as { id: number }[];
+    // A running start time vote opens registration itself when it closes.
+    const rows = this.ctx.db
+      .prepare("SELECT id FROM tournaments WHERE state IN ('published','registration_open','registration_closed') AND id NOT IN (SELECT tournament_id FROM start_polls WHERE status = 'open')")
+      .all() as { id: number }[];
     for (const r of rows) {
       const t = loadTournament(this.ctx, r.id);
       const { opensAt, closesAt } = t.cfg.registration;

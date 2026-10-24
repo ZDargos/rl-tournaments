@@ -6,6 +6,7 @@ import { notificationLog, unreachablePlayers } from './notifications.js';
 import { competitorsOf, matchesOf, matchLabel, membersByCompetitor, type MatchRow } from './queries.js';
 import { entriesOf, entryMembers, entryForUser } from './registration.js';
 import { availabilityOf } from './availability.js';
+import { pollView } from './polls.js';
 import { userNames } from './users.js';
 import { checkStart, standardStandings, swissTotalRounds } from './engine.js';
 import { currentPlan, poolStandings, qualifiersPerPool } from './sixmans.js';
@@ -143,6 +144,7 @@ export async function tournamentDetail(ctx: AppContext, id: number, viewerId: st
     guild: guild ? { id: guild.id, name: guild.name, iconUrl: guild.iconUrl, botPresent: guild.botPresent } : null,
     viewer: { userId: viewerId, role: access.role, canManage: manage, isCreator: access.isCreator, entryId: myEntry?.id ?? null, myMatchIds: myMatches, muted, availability: viewerId && myEntry ? avail.get(viewerId)?.status ?? 'not_asked' : null },
     entries: entryDtos,
+    startPoll: pollView(ctx, t, viewerId, manage),
     competitors: comps.map((c) => ({ id: c.id, name: c.name, seed: c.seed, kind: c.kind, stage: c.stage, players: (members.get(c.id) ?? []).map((x) => ({ userId: x.userId, name: names.get(x.userId) ?? 'Player', role: x.role })) })),
     matches,
     pools: pools.map((p) => ({ id: p.id, index: p.idx, name: p.name })),

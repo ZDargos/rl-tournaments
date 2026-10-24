@@ -5,6 +5,7 @@ import { addMinutes, json } from '../lib/util.js';
 import { DiscordApiError, DiscordCodes } from '../discord/port.js';
 import { loadTournament, managerIds, participantIds, type LoadedTournament } from './access.js';
 import { getGuild } from './guilds.js';
+import { chosenChannel, recordPost, type ChannelKind } from './channels.js';
 import { renderNotification } from './messages.js';
 import { markAsked } from './availability.js';
 
@@ -217,6 +218,9 @@ function audienceUserIds(ctx: AppContext, n: NotificationRow, t: LoadedTournamen
   return [];
 }
 
+/** Registration posts go to the registration channel when there is one. */
+const channelKind = (category: Category): ChannelKind => (category === 'registration_open' || category === 'registration_close' ? 'registration' : 'announcement');
+
 /** Effective delivery plan for a category, combining tournament settings. */
 export function deliveryPlan(t: LoadedTournament | null, category: Category, audience: string): { channel: boolean; dm: boolean } {
   if (ORGANIZER_ONLY.has(category)) return { channel: false, dm: true };
@@ -227,10 +231,10 @@ export function deliveryPlan(t: LoadedTournament | null, category: Category, aud
   // organizer turned DMs off they fall back to the announcement channel with a mention.
   if (audience.startsWith('side:')) {
     const dm = t.cfg.notifications.dms;
-    return { dm, channel: !dm && t.cfg.notifications.channelAnnouncements && (t.visibility === 'public' || !!t.cfg.notifications.announcementChannelId) };
+    return { dm, channel: !dm && t.cfg.notifications.channelAnnouncements && (t.visibility === 'public' || !!chosenChannel(t, 'announcement')) };
   }
   // Private tournaments only announce in a channel the organizer explicitly chose for this tournament.
-  const channelAllowed = t.cfg.notifications.channelAnnouncements && (t.visibility === 'public' || !!t.cfg.notifications.announcementChannelId);
+  const channelAllowed = t.cfg.notifications.channelAnnouncements && (t.visibility === 'public' || !!chosenChannel(t, channelKind(category)));
   return { channel: !personal && channelAllowed && c.channel, dm: t.cfg.notifications.dms && c.dm };
 }
 
@@ -300,14 +304,14 @@ async function deliver(ctx: AppContext, n: NotificationRow) {
   let sent = 0;
 
   if (plan.channel && t) {
-    const guild = getGuild(ctx, t.guild_id);
-    const channelId = t.cfg.notifications.announcementChannelId ?? guild?.announcement_channel_id ?? null;
+    const channelId = chosenChannel(t, channelKind(n.category)) ?? getGuild(ctx, t.guild_id)?.announcement_channel_id ?? null;
     if (!channelId) {
       if (!deliveryExists(ctx, n.id, 'channel', 'none')) recordDelivery(ctx, n.id, 'channel', 'none', 'skipped', 'no_announcement_channel');
     } else if (!deliveryExists(ctx, n.id, 'channel', channelId)) {
       recordDelivery(ctx, n.id, 'channel', channelId, 'sending');
       try {
-        await ctx.discord.sendChannelMessage(channelId, { content: msg.channel, mentionUserIds: msg.mentionUserIds });
+        const posted = await ctx.discord.sendChannelMessage(channelId, { content: msg.channel, mentionUserIds: msg.mentionUserIds });
+        recordPost(ctx, t.id, channelId, posted.id);
         recordDelivery(ctx, n.id, 'channel', channelId, 'sent');
         sent++;
       } catch (err) {

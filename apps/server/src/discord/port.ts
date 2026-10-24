@@ -21,7 +21,7 @@ export interface MessageContent {
   content: string;
   /** User ids that may be pinged. Everyone else (including @everyone) is suppressed. */
   mentionUserIds?: string[];
-  /** One row of buttons (max 5). An edit with no buttons removes them. */
+  /** Buttons, five per row (max 25). An edit with no buttons removes them. */
   buttons?: MessageButton[];
 }
 
