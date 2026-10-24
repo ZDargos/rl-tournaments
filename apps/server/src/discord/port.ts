@@ -55,6 +55,7 @@ export const DiscordCodes = {
   CannotDM: 50007,
   MissingPermissions: 50013,
   TargetNotInVoice: 40032,
+  UnknownMessage: 10008,
 } as const;
 
 export interface BotPermissionReport {
@@ -78,6 +79,7 @@ export interface DiscordPort {
   moveMember(guildId: string, userId: string, channelId: string): Promise<void>;
   sendChannelMessage(channelId: string, message: MessageContent): Promise<{ id: string }>;
   editChannelMessage(channelId: string, messageId: string, message: MessageContent): Promise<void>;
+  deleteChannelMessage(channelId: string, messageId: string): Promise<'deleted' | 'not_found'>;
   sendDM(userId: string, message: MessageContent): Promise<{ id: string }>;
   botPermissions(guildId: string): Promise<BotPermissionReport>;
 }
@@ -92,6 +94,7 @@ export class FakeDiscord implements DiscordPort {
   /** Current content of channel messages by id (sends and edits). */
   messages = new Map<string, { channelId: string; content: string; buttons: MessageButton[] }>();
   edits: { channelId: string; messageId: string; content: string; buttons: MessageButton[] }[] = [];
+  deletes: { channelId: string; messageId: string }[] = [];
   failSend: DiscordApiError | null = null;
   dmClosed = new Set<string>();
   failCreateVoice: DiscordApiError | null = null;
@@ -159,9 +162,16 @@ export class FakeDiscord implements DiscordPort {
     this.messages.set(messageId, { channelId, content: message.content, buttons: message.buttons ?? [] });
     this.edits.push({ channelId, messageId, content: message.content, buttons: message.buttons ?? [] });
   }
+  async deleteChannelMessage(channelId: string, messageId: string) {
+    const m = this.messages.get(messageId);
+    if (!m || m.channelId !== channelId) return 'not_found' as const;
+    this.messages.delete(messageId);
+    this.deletes.push({ channelId, messageId });
+    return 'deleted' as const;
+  }
   async sendDM(userId: string, message: MessageContent) {
     if (this.dmClosed.has(userId)) throw new DiscordApiError('Cannot send messages to this user', DiscordCodes.CannotDM, 403, true);
-    this.sent.push({ kind: 'dm', target: userId, content: message.content, mentions: [] });
+    this.sent.push({ kind: 'dm', target: userId, content: message.content, mentions: [], buttons: message.buttons ?? [] });
     return { id: this.nextId() };
   }
   async botPermissions() {

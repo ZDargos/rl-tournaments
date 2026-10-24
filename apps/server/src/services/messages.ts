@@ -4,11 +4,15 @@ import type { LoadedTournament } from './access.js';
 import type { Category } from './notifications.js';
 import { competitorMembers, competitorName, getMatch, matchGames, matchLabel, poolName } from './queries.js';
 import { discordTime, escapeDiscord } from '../lib/util.js';
+import type { MessageButton } from '../discord/port.js';
+import { availabilityCustomId, availabilityDigest } from './availability.js';
 
 export interface RenderedMessage {
   channel: string;
   dm: string;
   mentionUserIds: string[];
+  /** Buttons under the DM (channel posts never get them). */
+  dmButtons?: MessageButton[];
 }
 
 const link = (ctx: AppContext, path: string) => `${ctx.env.WEB_URL}/#${path}`;
@@ -31,7 +35,17 @@ export function renderNotification(
     case 'tournament_start': {
       if (!t) return null;
       if (n.kind === 'reminder') {
-        return simple(`⏰ ${title} starts ${discordTime(t.cfg.schedule.startAt!, 'R')} (${discordTime(t.cfg.schedule.startAt!, 'f')}). ${t.cfg.checkIn.enabled ? 'Remember to check in! ' : ''}${tLink}`);
+        const text = `⏰ ${title} starts ${discordTime(t.cfg.schedule.startAt!, 'R')} (${discordTime(t.cfg.schedule.startAt!, 'f')}). ${t.cfg.checkIn.enabled ? 'Remember to check in! ' : ''}${tLink}`;
+        return {
+          channel: text,
+          dm: `${text}
+Can you still make it? Tap below so the organizers know.`,
+          mentionUserIds: [],
+          dmButtons: [
+            { customId: availabilityCustomId(t.id, 'yes'), label: '✅ I can make it', style: 'success' },
+            { customId: availabilityCustomId(t.id, 'no'), label: '❌ I can’t make it', style: 'danger' },
+          ],
+        };
       }
       if (p.event === 'paused') return simple(`⏸️ ${title} has been paused by the organizers.`);
       if (p.event === 'resumed') return simple(`▶️ ${title} has resumed.`);
@@ -94,6 +108,12 @@ export function renderNotification(
       const medals = ['🥇', '🥈', '🥉'];
       const lines = top.map((r) => `${medals[r.placement - 1] ?? r.placement} ${escapeDiscord(r.name)}`).join('\n');
       return simple(`🏆 ${title} is complete!\n${lines}\nFull results: ${tLink}`);
+    }
+    case 'availability_digest': {
+      if (!t) return null;
+      const body = availabilityDigest(ctx, t);
+      if (!body) return null;
+      return simple(`📋 ${title} starts ${discordTime(t.cfg.schedule.startAt!, 'R')}. Who can make it:\n${body}\n${link(ctx, `/t/${t.id}/manage`)}`);
     }
     case 'organizer_alert':
       return simple(`🛠️ Organizer notice for ${title || 'your tournament'}: ${escapeDiscord(String(p.text ?? ''))}${t ? ` ${link(ctx, `/t/${t.id}/manage`)}` : ''}`);

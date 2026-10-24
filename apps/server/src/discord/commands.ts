@@ -179,7 +179,7 @@ export const SETTING_SUGGESTIONS = [
   'schedule.startAt', 'schedule.timezone', 'schedule.autoStart', 'seeding.method', 'results.confirmation', 'results.autoConfirmMinutes', 'minEntrants',
   'singleElim.thirdPlaceMatch', 'doubleElim.grandFinalReset', 'swiss.rounds', 'roundRobin.encounters', 'sixmans.poolCount', 'sixmans.skillMethod',
   'sixmans.roundsMode', 'sixmans.gamesPerPlayer', 'sixmans.roundsPerPool', 'sixmans.skillBalancedTeams', 'sixmans.groupBestOf', 'sixmans.finalsBestOf', 'sixmans.qualifiersPerPool', 'sixmans.qualifierAdjustment',
-  'notifications.channelAnnouncements', 'notifications.dms', 'notifications.announcementChannelId', 'notifications.startReminders', 'notifications.matchReminders',
+  'notifications.channelAnnouncements', 'notifications.dms', 'notifications.announcementChannelId', 'notifications.startReminderHours', 'notifications.matchReminders',
   'scoreReports.channelId', 'scoreReports.votesNeeded', 'scoreReports.requireBothTeams', 'voice.lobbyChannelId', 'voice.lobbySeconds',
   'sixmans.poolShuffleTolerance', 'voice.enabled', 'voice.moveConnectedPlayers', 'voice.visibleToParticipants', 'voice.categoryId', 'teamSize', 'registrationMode', 'format',
 ];

@@ -158,7 +158,8 @@ describe('notifications & jobs', () => {
     expect(after.filter((m) => /starts/i.test(m.content)).length).toBe(0); // stale reminders skipped
     expect(after.length).toBe(0); // the crashed message was not re-sent
     const statuses = s.db.prepare("SELECT status, last_error FROM notifications WHERE kind = 'reminder'").all() as { status: string; last_error: string }[];
-    expect(statuses.every((r) => r.status === 'skipped')).toBe(true);
+    // Skipped as stale, or cancelled by the start-up reschedule (their moment has passed); never sent.
+    expect(statuses.every((r) => r.status === 'skipped' || r.status === 'cancelled')).toBe(true);
   });
 
   it('auto-start failure is recorded once and organizers are alerted', async () => {

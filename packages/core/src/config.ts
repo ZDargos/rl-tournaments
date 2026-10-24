@@ -55,6 +55,8 @@ const SIXMANS_TIEBREAKERS = ['points', 'goal_diff', 'goals_for', 'wins', 'fewest
 export type SixmansTiebreaker = (typeof SIXMANS_TIEBREAKERS)[number];
 
 const minutesList = z.array(z.number().int().min(0).max(60 * 24 * 60)).max(10);
+/** Hours, to the minute (0.25 = 15 minutes). */
+const hoursList = z.array(z.number().min(0).max(24 * 60)).max(10);
 
 export const configSchema = z.object({
   format: z.enum(FORMATS).default('single_elim'),
@@ -218,8 +220,11 @@ export const configSchema = z.object({
           standings: { channel: true, dm: false },
           tournament_complete: { channel: true, dm: true },
         }),
-      /** Minutes before tournament start to remind participants. */
-      startReminders: minutesList.default([1440, 60, 15]),
+      /**
+       * Hours before tournament start to remind participants (by DM, with "can you make it?" buttons).
+       * Replaces the old `startReminders` (minutes), which parseConfig still accepts and converts.
+       */
+      startReminderHours: hoursList.default([48, 24, 1]),
       /** Minutes before check-in closes. */
       checkInReminders: minutesList.default([30, 5]),
       /** Minutes after a match becomes ready if still unreported. */
@@ -261,11 +266,23 @@ export type ConfigInput = z.input<typeof configSchema>;
 
 /** Parse/complete a config, applying defaults for missing fields. Throws ZodError on invalid input. */
 export function parseConfig(input: unknown): TournamentConfig {
-  const cfg = configSchema.parse(input ?? {});
+  const cfg = configSchema.parse(upgradeLegacy(input ?? {}));
   // Merge category defaults so a partial `categories` object still covers every category.
   const defaults = configSchema.parse({}).notifications.categories;
   cfg.notifications.categories = { ...defaults, ...cfg.notifications.categories };
   return normalizeConfig(cfg);
+}
+
+/** Minutes for an hours setting, rounded to the minute. */
+export const hoursToMinutes = (h: number) => Math.round(h * 60);
+
+/** Older configs (and `/tourney set notifications.startReminders`) give start reminders in minutes. */
+function upgradeLegacy(input: unknown): unknown {
+  const n = (input as { notifications?: Record<string, unknown> })?.notifications;
+  if (!n || typeof n !== 'object' || n.startReminders === undefined) return input;
+  const { startReminders, ...rest } = n;
+  const hours = (Array.isArray(startReminders) ? startReminders : [startReminders]).map((m) => (typeof m === 'number' ? Math.round((m / 60) * 10000) / 10000 : m));
+  return { ...(input as object), notifications: { ...rest, startReminderHours: hours } };
 }
 
 export function defaultConfig(overrides: ConfigInput = {}): TournamentConfig {

@@ -4,7 +4,8 @@ import { RANKS, STATE_LABELS, type TransitionAction } from '@rl/core';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { useTournament } from './Tournament';
-import { ConfirmButton, Empty, ErrorBox, Field, MatchBadge, Modal, Spinner, StateBadge, Tabs, useToast } from '../components/ui';
+import { AVAILABILITY_ORDER, AvailabilityBadge, ConfirmButton, Empty, ErrorBox, Field, Help, MatchBadge, Modal, Spinner, StateBadge, Tabs, useToast } from '../components/ui';
+import { HELP } from '../components/settingHelp';
 import { ConfigForm } from '../components/ConfigForm';
 import { MemberPicker } from '../components/MemberPicker';
 import { SixmansAdmin } from './SixmansAdmin';
@@ -146,10 +147,10 @@ function Settings({ d, reload }: { d: any; reload: () => void }) {
     <div className="stack">
       <div className="card">
         <div className="form-grid">
-          <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></Field>
-          <Field label="Visibility"><select value={visibility} onChange={(e) => setVisibility(e.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field>
+          <Field help={HELP.name} label="Name"><input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></Field>
+          <Field help={HELP.visibility} label="Visibility"><select value={visibility} onChange={(e) => setVisibility(e.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field>
         </div>
-        <div style={{ marginTop: 12 }}><Field label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={4000} /></Field></div>
+        <div style={{ marginTop: 12 }}><Field help={HELP.description} label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={4000} /></Field></div>
       </div>
       <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} playerCount={d.entries.filter((e: any) => e.status === 'confirmed').length} /></div>
       <ErrorBox error={error} />
@@ -213,6 +214,10 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
   const statusOrder = ['pending', 'confirmed', 'waitlisted', 'rejected', 'withdrawn', 'removed', 'no_show'];
   const entries = [...d.entries].sort((a, b) => statusOrder.indexOf(a.status) - statusOrder.indexOf(b.status));
   const allPlayers = d.competitors.flatMap((c: any) => c.players);
+  // Availability of everyone on a confirmed registration (players, or each team member).
+  const signedUp = d.entries.filter((e: any) => e.status === 'confirmed').flatMap((e: any) => (e.kind === 'team' ? e.members : [{ userId: e.userId, availability: e.availability }]));
+  const availCounts = AVAILABILITY_ORDER.map((s) => [s, signedUp.filter((m: any) => (m.availability ?? 'not_asked') === s).length] as const).filter(([, n]) => n > 0);
+  const setAvail = (userId: string, answer: string) => act(() => api(`/api/tournaments/${t.id}/availability`, { body: { userId, answer } }), 'Availability saved');
   return (
     <div className="stack">
       {!started && d.guild && (
@@ -233,15 +238,40 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
             </div>
           )}
         </div>
+        {signedUp.length > 0 && !started && (
+          <div className="row small" style={{ marginBottom: 10, gap: 8 }}>
+            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
+            {availCounts.map(([s, n]) => <span key={s} className="row" style={{ gap: 4 }}><AvailabilityBadge status={s} /> {n}</span>)}
+          </div>
+        )}
         {entries.length === 0 ? <Empty icon="👥" title="No registrations yet" /> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Name</th><th>Status</th>{t.config.checkIn.enabled && <th>Check-in</th>}<th>{six && t.config.sixmans.skillMethod === 'rank' ? 'Rank' : 'Seed'}</th><th /></tr></thead>
+              <thead><tr><th>Name</th><th>Status</th><th>Can make it?</th>{t.config.checkIn.enabled && <th>Check-in</th>}<th>{six && t.config.sixmans.skillMethod === 'rank' ? 'Rank' : 'Seed'}</th><th /></tr></thead>
               <tbody>
                 {entries.map((e: any) => (
                   <tr key={e.id}>
                     <td><strong>{e.name}</strong>{e.kind === 'team' && <div className="tiny muted">{e.members.map((m: any) => `${m.name}${m.role === 'captain' ? ' (C)' : m.role === 'substitute' ? ' (sub)' : ''}`).join(', ')}</div>}</td>
                     <td><span className="badge">{e.status}</span></td>
+                    <td>
+                      {!['pending', 'confirmed', 'waitlisted'].includes(e.status) ? '—' : (
+                        <div className="stack" style={{ gap: 4 }}>
+                          {(e.kind === 'team' ? e.members : [{ userId: e.userId, name: null, availability: e.availability }]).map((m: any) => (
+                            <div key={m.userId} className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                              {m.name && <span className="tiny muted">{m.name}</span>}
+                              <AvailabilityBadge status={m.availability} />
+                              {!started && (
+                                <select aria-label="Set availability" className="tiny" value="" disabled={busy} onChange={(ev) => ev.target.value && void setAvail(m.userId, ev.target.value)} style={{ width: 'auto', padding: '2px 4px' }}>
+                                  <option value="">Set…</option>
+                                  <option value="confirmed">Confirmed</option>
+                                  <option value="declined">Can’t make it</option>
+                                </select>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                     {t.config.checkIn.enabled && <td>{e.checkedIn ? '✅' : e.status === 'confirmed' && !started ? <button className="btn small ghost" disabled={busy} onClick={() => act(() => api(`/api/tournaments/${t.id}/check-in`, { body: { entryId: e.id } }), 'Checked in')}>Check in</button> : '—'}</td>}
                     <td>
                       {six && t.config.sixmans.skillMethod === 'rank' ? (

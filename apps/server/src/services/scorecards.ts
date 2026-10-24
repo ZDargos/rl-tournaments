@@ -10,8 +10,9 @@ import { escapeDiscord } from '../lib/util.js';
 /**
  * Score report cards: when a tournament has a score report channel (config.scoreReports.channelId),
  * every live match gets one message there with a button per team. The players vote for the winner
- * (results.ts voteResult); the card shows the running count and is edited to show the result when
- * the match ends, however it ended (vote, website report or organizer).
+ * (results.ts voteResult); the card shows the running count. The channel only holds live matches: when
+ * a match ends, however it ended (vote, website report or organizer), its card is deleted. A disputed
+ * match keeps its card (saying an organizer will decide) until the result is set.
  *
  * Like voice channels this is reconciled from the database, so it is safe after restarts: a row in
  * match_cards is written ('posting') before the Discord call, so a card is never posted twice.
@@ -116,6 +117,21 @@ async function edit(ctx: AppContext, card: CardRow, msg: MessageContent, status:
   }
 }
 
+/** Delete a finished match's card. The row stays ('closed', no message) so the card is not posted again. */
+async function remove(ctx: AppContext, card: CardRow) {
+  if (!card.message_id) return;
+  try {
+    await ctx.discord.deleteChannelMessage(card.channel_id, card.message_id);
+    setCard(ctx, card.match_id, { status: 'closed', message_id: null, rendered: null });
+  } catch (err) {
+    // No permission (or the channel is gone): nothing more we can do with this card.
+    if (err instanceof DiscordApiError && err.permanent) setCard(ctx, card.match_id, { status: 'closed', message_id: null, rendered: null, error: err.message.slice(0, 300) });
+    else ctx.log.warn({ err: String(err), match: card.match_id }, 'deleting score card failed; will retry');
+  }
+}
+
+const FINAL = new Set(['completed', 'cancelled']);
+
 /** Bring the score cards of one tournament in line with its matches. */
 export async function syncScoreCards(ctx: AppContext, tournamentId: number) {
   if (!ctx.discord.enabled) return;
@@ -136,16 +152,18 @@ export async function syncScoreCards(ctx: AppContext, tournamentId: number) {
       const stale = card && (card.status === 'closed' || card.status === 'failed') && (card.result_version !== m.result_version || card.channel_id !== channelId);
       if (!card || stale || card.status === 'posting') await post(ctx, t, m, channelId!);
       else if (card.status === 'open') await edit(ctx, card, renderCard(ctx, t, m, 'open'), 'open');
-    } else if (card && (card.status === 'open' || card.status === 'closed') && (t.state !== 'paused' || !LIVE.has(m.status))) {
-      // Also keeps closed cards current (e.g. disputed, then set by an organizer).
-      await edit(ctx, card, renderCard(ctx, t, m, 'closed'), 'closed');
+    } else if (card && card.message_id && (card.status === 'open' || card.status === 'closed') && (t.state !== 'paused' || !LIVE.has(m.status))) {
+      // A disputed match keeps a card saying so until an organizer sets the result; every other
+      // finished match's card is deleted so the channel only shows matches being played.
+      if (m.status === 'disputed' && !FINAL.has(t.state)) await edit(ctx, card, renderCard(ctx, t, m, 'closed'), 'closed');
+      else await remove(ctx, card);
     }
   }
 }
 
 export async function syncAllScoreCards(ctx: AppContext) {
   const ids = ctx.db
-    .prepare("SELECT id FROM tournaments WHERE state IN ('in_progress','paused') UNION SELECT DISTINCT tournament_id FROM match_cards WHERE status IN ('posting','open')")
+    .prepare("SELECT id FROM tournaments WHERE state IN ('in_progress','paused') UNION SELECT DISTINCT tournament_id FROM match_cards WHERE status IN ('posting','open') OR (status = 'closed' AND message_id IS NOT NULL)")
     .all() as { id: number }[];
   for (const r of ids) {
     try {

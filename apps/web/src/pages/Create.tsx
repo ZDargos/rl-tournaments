@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { useAsync } from '../lib/hooks';
 import { ConfigForm } from '../components/ConfigForm';
 import { Empty, ErrorBox, Field, Spinner } from '../components/ui';
+import { HELP } from '../components/settingHelp';
 import { localTz } from '../lib/format';
 
 export function CreatePage() {
@@ -52,18 +53,18 @@ export function CreatePage() {
       <h1>Create a tournament</h1>
       <div className="card">
         <div className="form-grid">
-          <Field label="Discord server">
+          <Field help={HELP.server} label="Discord server">
             <select value={guildId} onChange={(e) => { setGuildId(e.target.value); setPresetId(null); }}>
               <option value="">Choose…</option>
               {guilds.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </Field>
-          <Field label="Name"><input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Friday Night 3v3" /></Field>
-          <Field label="Visibility" hint="Private: only organizers, participants and invited members can see it.">
+          <Field help={HELP.name} label="Name"><input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Friday Night 3v3" /></Field>
+          <Field help={HELP.visibility} label="Visibility" hint="Private: only organizers, participants and invited members can see it.">
             <select value={visibility} onChange={(e) => setVisibility(e.target.value as 'public')}><option value="public">Public</option><option value="private">Private</option></select>
           </Field>
           {presets.length > 0 && (
-            <Field label="Start from a preset" hint="The preset’s settings are copied; later preset edits do not change this tournament.">
+            <Field help={HELP.preset} label="Start from a preset" hint="The preset’s settings are copied; later preset edits do not change this tournament.">
               <select value={presetId ?? ''} onChange={(e) => {
                 const id = e.target.value ? Number(e.target.value) : null;
                 setPresetId(id);
@@ -77,7 +78,7 @@ export function CreatePage() {
           )}
         </div>
         <div style={{ marginTop: 12 }}>
-          <Field label="Description (rules, prizes, links)"><textarea value={description} maxLength={4000} onChange={(e) => setDescription(e.target.value)} /></Field>
+          <Field help={HELP.description} label="Description (rules, prizes, links)"><textarea value={description} maxLength={4000} onChange={(e) => setDescription(e.target.value)} /></Field>
         </div>
       </div>
       <div className="card">

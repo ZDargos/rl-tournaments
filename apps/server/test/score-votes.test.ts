@@ -87,9 +87,9 @@ describe('Discord score report cards', () => {
     await s.settle();
     const done = s.db.prepare('SELECT status, winner, wins_a, wins_b FROM matches WHERE id = ?').get(m1.id) as Record<string, unknown>;
     expect(done).toMatchObject({ status: 'completed', winner: 'a', wins_a: 1, wins_b: 0 });
-    const card1 = s.discord.messages.get(cards[0].id!)!;
-    expect(card1.buttons).toEqual([]);
-    expect(card1.content).toMatch(/won/);
+    // The finished match's card is deleted: the channel only shows live matches.
+    expect(s.discord.messages.has(cards[0].id!)).toBe(false);
+    expect(s.discord.deletes.map((d) => d.messageId)).toEqual([cards[0].id]);
     const reports = s.db.prepare("SELECT kind, source FROM result_reports WHERE match_id = ? AND superseded = 0 ORDER BY id").all(m1.id) as { kind: string }[];
     expect(reports.map((r) => r.kind)).toEqual(['report', 'confirm', 'confirm']);
     expect(s.db.prepare("SELECT 1 FROM audit_events WHERE tournament_id = ? AND action = 'result.voted'").get(tid)).toBeTruthy();
@@ -124,9 +124,38 @@ describe('Discord score report cards', () => {
     ok(await players.get(a[1])!.post(`/api/matches/${m.id}/report`, { games: [{ a: 3, b: 1 }] }));
     ok(await players.get(b[1])!.post(`/api/matches/${m.id}/confirm`));
     await s.settle();
-    const card = [...s.discord.messages.values()].find((x) => x.channelId === SCORES)!;
-    expect(card.buttons).toEqual([]);
-    expect(card.content).toMatch(/won/);
+    // The old card is gone; the only card left is the next live match's.
+    const left = [...s.discord.messages.values()].filter((x) => x.channelId === SCORES);
+    expect(left.length).toBe(1);
+    expect(left[0].content).not.toContain(`Match ${m.id}**`);
+    expect(left[0].buttons.length).toBe(2);
+  });
+
+  it('a disputed card stays until an organizer sets the result, then is deleted', async () => {
+    const { s, admin, current } = await running();
+    const m = await current();
+    const { a, b } = sides(m);
+    for (const u of a.slice(0, 2)) await handleInteraction(s.ctx, button(u, `vote:${m.id}:a`));
+    for (const u of b.slice(0, 2)) await handleInteraction(s.ctx, button(u, `vote:${m.id}:b`));
+    await s.settle();
+    const cardId = s.discord.sent.find((x) => x.target === SCORES)!.id!;
+    expect(s.discord.messages.get(cardId)!.content).toMatch(/organizer will set the result/);
+    ok(await admin.post(`/api/matches/${m.id}/resolve`, { games: [{ a: 2, b: 1 }], reason: 'Checked the replay' }));
+    await s.settle();
+    expect(s.discord.messages.has(cardId)).toBe(false);
+  });
+
+  it('cleans up finished cards left over from before (even in completed tournaments)', async () => {
+    const { s, tid, current } = await running();
+    const m = await current();
+    const cardId = s.discord.sent.find((x) => x.target === SCORES)!.id!;
+    // Simulate an old closed card that was edited instead of deleted, in a tournament that has since ended.
+    s.db.prepare("UPDATE match_cards SET status = 'closed' WHERE match_id = ?").run(m.id);
+    s.db.prepare("UPDATE matches SET status = 'void' WHERE tournament_id = ? AND status IN ('ready','pending')").run(tid);
+    s.db.prepare("UPDATE tournaments SET state = 'cancelled' WHERE id = ?").run(tid);
+    await s.settle();
+    expect(s.discord.messages.has(cardId)).toBe(false);
+    expect(s.db.prepare('SELECT status, message_id FROM match_cards WHERE match_id = ?').get(m.id)).toEqual({ status: 'closed', message_id: null });
   });
 
   it('cards are not posted without a channel', async () => {

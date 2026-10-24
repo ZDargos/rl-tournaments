@@ -154,8 +154,20 @@ export class DiscordJsAdapter implements DiscordPort {
     await call(() => ch.messages.edit(messageId, { content: message.content, components: components(message), allowedMentions: { parse: [] } }));
   }
 
+  async deleteChannelMessage(channelId: string, messageId: string) {
+    try {
+      const ch = await this.client.channels.fetch(channelId);
+      if (!ch || !ch.isTextBased()) return 'not_found' as const;
+      await ch.messages.delete(messageId);
+      return 'deleted' as const;
+    } catch (err) {
+      if (err instanceof DiscordAPIError && (err.code === DiscordCodes.UnknownMessage || err.code === DiscordCodes.UnknownChannel)) return 'not_found' as const;
+      mapError(err);
+    }
+  }
+
   async sendDM(userId: string, message: MessageContent) {
-    const msg = await call(() => this.client.users.send(userId, { content: message.content, allowedMentions: { parse: [] } }));
+    const msg = await call(() => this.client.users.send(userId, { content: message.content, components: components(message), allowedMentions: { parse: [] } }));
     return { id: msg.id };
   }
 

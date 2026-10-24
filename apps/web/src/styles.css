@@ -109,6 +109,10 @@ input, select, textarea { width: 100%; background: var(--bg2); border: 1px solid
 input:focus, select:focus, textarea:focus, .btn:focus-visible, a:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
 input[type='checkbox'] { width: auto; accent-color: var(--orange); transform: scale(1.15); }
 textarea { min-height: 90px; resize: vertical; }
+.help { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; border-radius: 50%; font-size: 12px; font-weight: 700; line-height: 1; color: var(--muted); cursor: help; vertical-align: -2px; user-select: none; }
+.help:hover, .help:focus-visible { color: var(--blue); outline: none; }
+.help-tip { position: fixed; z-index: 1000; padding: 9px 11px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--text); font-size: 0.82rem; font-weight: 450; line-height: 1.45; text-align: left; white-space: normal; pointer-events: none; }
+.help-tip.above { transform: translateY(-100%); }
 .check { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 0.93rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; }
 

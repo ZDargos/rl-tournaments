@@ -1,4 +1,4 @@
-import type { NotificationCategory } from '@rl/core';
+import { hoursToMinutes, type NotificationCategory } from '@rl/core';
 import type { AppContext } from './context.js';
 import { nowIso } from './context.js';
 import { addMinutes, json } from '../lib/util.js';
@@ -6,6 +6,7 @@ import { DiscordApiError, DiscordCodes } from '../discord/port.js';
 import { loadTournament, managerIds, participantIds, type LoadedTournament } from './access.js';
 import { getGuild } from './guilds.js';
 import { renderNotification } from './messages.js';
+import { markAsked } from './availability.js';
 
 /**
  * Persistent notification outbox.
@@ -18,7 +19,13 @@ import { renderNotification } from './messages.js';
  * ('sending'), so a crash mid-send results in at most one message, never a repeat.
  */
 
-export type Category = NotificationCategory | 'organizer_alert' | 'personal';
+export type Category = NotificationCategory | 'organizer_alert' | 'personal' | 'availability_digest';
+
+/** Messages for organizers only: always by DM, never muted. */
+const ORGANIZER_ONLY = new Set<Category>(['organizer_alert', 'personal', 'availability_digest']);
+
+/** Hours before the start when organizers get everyone's availability. */
+export const DIGEST_HOURS = 24;
 
 export interface EnqueueInput {
   tournamentId: number | null;
@@ -82,7 +89,8 @@ export function scheduleTournamentReminders(ctx: AppContext, t: LoadedTournament
   const startAt = t.cfg.schedule.startAt;
   if (active && startAt) {
     const start = new Date(startAt);
-    for (const m of t.cfg.notifications.startReminders) {
+    // Keys stay in minutes (settings are hours), so reminders queued before the switch still match.
+    for (const m of new Set(t.cfg.notifications.startReminderHours.map(hoursToMinutes))) {
       const runAt = addMinutes(start, -m);
       if (runAt <= now) continue; // never send a reminder whose moment has already passed
       wanted.push({
@@ -90,6 +98,12 @@ export function scheduleTournamentReminders(ctx: AppContext, t: LoadedTournament
         runAt: runAt.toISOString(), expiresAt: startAt, audience: 'participants', payload: { minutes: m }, ref: startAt,
       });
     }
+    const digestAt = addMinutes(start, -DIGEST_HOURS * 60);
+    if (digestAt > now)
+      wanted.push({
+        tournamentId: t.id, category: 'availability_digest', kind: 'reminder', key: `t${t.id}:digest:${startAt}`,
+        runAt: digestAt.toISOString(), expiresAt: startAt, audience: 'admins', payload: {}, ref: startAt,
+      });
     if (t.cfg.checkIn.enabled) {
       const opens = addMinutes(start, -t.cfg.checkIn.opensMinutesBefore);
       const closes = addMinutes(start, -t.cfg.checkIn.closesMinutesBefore);
@@ -110,8 +124,8 @@ export function scheduleTournamentReminders(ctx: AppContext, t: LoadedTournament
   }
   const keep = new Set(wanted.map((w) => w.key));
   const pending = ctx.db
-    .prepare("SELECT id, idempotency_key FROM notifications WHERE tournament_id = ? AND status = 'pending' AND (idempotency_key LIKE ? OR idempotency_key LIKE ?)")
-    .all(t.id, `t${t.id}:start:%`, `t${t.id}:checkin:%`) as { id: number; idempotency_key: string }[];
+    .prepare("SELECT id, idempotency_key FROM notifications WHERE tournament_id = ? AND status = 'pending' AND (idempotency_key LIKE ? OR idempotency_key LIKE ? OR idempotency_key LIKE ?)")
+    .all(t.id, `t${t.id}:start:%`, `t${t.id}:checkin:%`, `t${t.id}:digest:%`) as { id: number; idempotency_key: string }[];
   for (const p of pending) if (!keep.has(p.idempotency_key)) ctx.db.prepare("UPDATE notifications SET status = 'cancelled', updated_at = ? WHERE id = ?").run(nowIso(ctx), p.id);
   for (const w of wanted) upsertReminder(ctx, w);
 }
@@ -151,7 +165,7 @@ function staleReason(ctx: AppContext, n: NotificationRow, t: LoadedTournament | 
   if (!t) return n.tournament_id ? 'tournament_deleted' : null;
   if (t.state === 'cancelled' && n.category !== 'tournament_complete' && n.category !== 'personal') return 'tournament_cancelled';
   if (n.kind === 'reminder') {
-    if (n.category === 'tournament_start' || n.category === 'check_in') {
+    if (n.category === 'tournament_start' || n.category === 'check_in' || n.category === 'availability_digest') {
       if (n.ref !== t.cfg.schedule.startAt) return 'start_time_changed';
       if (t.state === 'in_progress' || t.state === 'paused' || t.state === 'completed') return 'already_started';
     }
@@ -205,7 +219,7 @@ function audienceUserIds(ctx: AppContext, n: NotificationRow, t: LoadedTournamen
 
 /** Effective delivery plan for a category, combining tournament settings. */
 export function deliveryPlan(t: LoadedTournament | null, category: Category, audience: string): { channel: boolean; dm: boolean } {
-  if (category === 'organizer_alert' || category === 'personal') return { channel: false, dm: true };
+  if (ORGANIZER_ONLY.has(category)) return { channel: false, dm: true };
   if (!t) return { channel: false, dm: true };
   const c = t.cfg.notifications.categories[category as NotificationCategory] ?? { channel: false, dm: false };
   const personal = audience.startsWith('user:') || audience === 'admins';
@@ -314,16 +328,18 @@ async function deliver(ctx: AppContext, n: NotificationRow) {
       const muted = t ? !!ctx.db.prepare('SELECT 1 FROM tournament_mutes WHERE user_id = ? AND tournament_id = ?').get(uid, t.id) : false;
       const blocked = u?.dm_blocked_until && Date.parse(u.dm_blocked_until) > ctx.clock.now().getTime();
       // Muting a tournament never suppresses personal or organizer messages.
-      const muteApplies = muted && n.category !== 'personal' && n.category !== 'organizer_alert';
+      const muteApplies = muted && !ORGANIZER_ONLY.has(n.category);
       if (!u || !u.dms_enabled || muteApplies || blocked) {
         recordDelivery(ctx, n.id, 'dm', uid, 'skipped', !u ? 'unknown_user' : !u.dms_enabled ? 'dms_disabled' : muteApplies ? 'muted' : 'dm_unreachable');
         continue;
       }
       recordDelivery(ctx, n.id, 'dm', uid, 'sending');
       try {
-        await ctx.discord.sendDM(uid, { content: msg.dm });
+        await ctx.discord.sendDM(uid, { content: msg.dm, buttons: msg.dmButtons });
         recordDelivery(ctx, n.id, 'dm', uid, 'sent');
         sent++;
+        // The reminder asked "can you still make it?": the 24-hour reply clock starts now.
+        if (msg.dmButtons?.length && t && n.category === 'tournament_start') markAsked(ctx, t, uid);
       } catch (err) {
         if (err instanceof DiscordApiError && (err.code === DiscordCodes.CannotDM || err.permanent)) {
           recordDelivery(ctx, n.id, 'dm', uid, 'failed', err.message);

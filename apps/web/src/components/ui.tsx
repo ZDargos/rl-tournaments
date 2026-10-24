@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { STATE_LABELS, type TournamentState } from '@rl/core';
 
 export function Spinner({ label }: { label?: string }) {
@@ -56,25 +56,90 @@ export function MatchBadge({ status }: { status: string }) {
   return <span className={`badge ${MATCH_COLOR[status] ?? ''}`}>{MATCH_LABEL[status] ?? status}</span>;
 }
 
+const AVAILABILITY: Record<string, { color: string; label: string; tip: string }> = {
+  confirmed: { color: 'green', label: 'Confirmed', tip: 'Said they can make it.' },
+  declined: { color: 'red', label: 'Can’t make it', tip: 'Said they can’t make it.' },
+  maybe: { color: 'orange', label: 'Maybe', tip: 'Did not answer within a day of the reminder.' },
+  awaiting: { color: 'yellow', label: 'Waiting', tip: 'Got the reminder, has not answered yet.' },
+  not_asked: { color: '', label: 'Not asked', tip: 'No reminder with the question has reached them yet (or their DMs are off).' },
+};
+export const AVAILABILITY_ORDER = ['confirmed', 'declined', 'maybe', 'awaiting', 'not_asked'] as const;
+export function AvailabilityBadge({ status }: { status?: string | null }) {
+  if (!status) return null;
+  const a = AVAILABILITY[status] ?? AVAILABILITY.not_asked;
+  return <span className={`badge ${a.color}`} title={a.tip}>{a.label}</span>;
+}
+
 export function Avatar({ name, url }: { name: string; url?: string | null }) {
   return <span className="avatar">{url ? <img src={url} alt="" referrerPolicy="no-referrer" /> : (name || '?').slice(0, 1).toUpperCase()}</span>;
 }
 
-export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+/**
+ * An ⓘ that explains a setting on hover, keyboard focus or tap. The bubble is positioned with
+ * `fixed` so scrolling tables and cards never clip it, and kept inside the screen on phones.
+ */
+export function Help({ text }: { text: string }) {
+  const [pos, setPos] = useState<{ top: number; left: number; above: boolean } | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
+  const tipId = useId();
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = Math.min(300, window.innerWidth - 16);
+    const left = Math.max(8, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - width - 8));
+    const above = r.bottom + 180 > window.innerHeight && r.top > 180;
+    setPos({ top: above ? r.top - 6 : r.bottom + 6, left, above });
+  };
+  const hide = () => setPos(null);
+  useEffect(() => {
+    if (!pos) return;
+    window.addEventListener('scroll', hide, true);
+    return () => window.removeEventListener('scroll', hide, true);
+  }, [pos]);
+  return (
+    <span
+      ref={ref}
+      className="help"
+      tabIndex={0}
+      role="button"
+      aria-label="What does this do?"
+      aria-describedby={pos ? tipId : undefined}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      // Inside a <label>, a click would toggle the checkbox or focus the input: show the help instead.
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        show(); // on phones a tap focuses and clicks; tapping elsewhere (blur) closes it
+      }}
+    >
+      ⓘ
+      {pos && (
+        <span id={tipId} role="tooltip" className={`help-tip${pos.above ? ' above' : ''}`} style={{ top: pos.top, left: pos.left, width: Math.min(300, window.innerWidth - 16) }}>
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
+export function Field({ label, hint, help, children }: { label: string; hint?: ReactNode; help?: string; children: ReactNode }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <span>{label}{help && <Help text={help} />}</span>
       {children}
       {hint && <span className="hint">{hint}</span>}
     </label>
   );
 }
 
-export function Check({ label, checked, onChange, disabled }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Check({ label, checked, onChange, disabled, help }: { label: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; help?: string }) {
   return (
     <label className="check">
       <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      <span>{label}</span>
+      <span>{label}{help && <Help text={help} />}</span>
     </label>
   );
 }
