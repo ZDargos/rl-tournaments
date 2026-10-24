@@ -272,6 +272,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             </div>
             <div className="row" style={{ marginTop: 10 }}>
               <Check help={HELP.requireBothTeams} label="Votes must include a player from each team" checked={cfg.scoreReports.requireBothTeams} onChange={(v) => set((c) => void (c.scoreReports.requireBothTeams = v))} />
+              <Check help={HELP.mentionPlayers} label="Ping the players when a card is posted" checked={cfg.scoreReports.mentionPlayers} onChange={(v) => set((c) => void (c.scoreReports.mentionPlayers = v))} />
             </div>
           </section>
           <section>

@@ -62,6 +62,15 @@ describe('vote tally rules', () => {
 });
 
 describe('Discord score report cards', () => {
+  it('can show the players without pinging them', async () => {
+    const { s, current } = await running({ scoreReports: { channelId: SCORES, mentionPlayers: false } });
+    const m1 = await current();
+    const card = s.discord.sent.find((x) => x.target === SCORES)!;
+    const { a, b } = sides(m1);
+    for (const u of [...a, ...b]) expect(card.content).toContain(`<@${u}>`);
+    expect(card.mentions).toEqual([]);
+  });
+
   it('posts a card per live match, counts votes, records the result and opens the next match', async () => {
     const { s, current, tid } = await running();
     const m1 = await current();

@@ -75,6 +75,7 @@ export const HELP = {
   scoreChannel: 'Text channel where every live match gets a card with one button per team. Players tap the winner; once enough votes agree, the result is recorded and the next match starts. Finished matches’ cards are deleted, so the channel only shows matches being played. Empty = off. The bot needs View Channel and Send Messages there.',
   votesNeeded: 'How many players must tap the same winner before the result counts.',
   requireBothTeams: 'The matching votes must include at least one player from each team, so one team cannot record its own win alone. If the teams vote for different winners, the match goes to an organizer.',
+  mentionPlayers: 'On: the players in the match get a Discord notification (an @mention) when its card is posted. Off: their names still show on the card, but nobody is pinged.',
 
   // Notifications
   announcementChannel: 'Text channel for tournament announcements (registration, start, results, standings). Empty: the server’s default channel. Private tournaments only post in a channel you pick here.',

@@ -218,6 +218,12 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
   const signedUp = d.entries.filter((e: any) => e.status === 'confirmed').flatMap((e: any) => (e.kind === 'team' ? e.members : [{ userId: e.userId, availability: e.availability }]));
   const availCounts = AVAILABILITY_ORDER.map((s) => [s, signedUp.filter((m: any) => (m.availability ?? 'not_asked') === s).length] as const).filter(([, n]) => n > 0);
   const setAvail = (userId: string, answer: string) => act(() => api(`/api/tournaments/${t.id}/availability`, { body: { userId, answer } }), 'Availability saved');
+  // Organizers can send the start reminder (with the "can you still make it?" buttons) by hand.
+  const canRemind = !started && t.state !== 'cancelled' && !!t.startAt;
+  const remind = async (userId: string | null, name?: string) => {
+    const r = await run(() => api<{ recipients: number }>(`/api/tournaments/${t.id}/availability-check`, { body: { userId } }));
+    if (r) toast(userId ? `Reminder sent to ${name}` : `Reminder sent to ${r.recipients} player${r.recipients === 1 ? '' : 's'}`);
+  };
   return (
     <div className="stack">
       {!started && d.guild && (
@@ -231,16 +237,21 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
       <div className="card">
         <div className="card-head">
           <h3>Registrations</h3>
-          {t.config.registrationMode === 'team' && t.teamSize > 1 && !started && (
-            <div className="row">
-              <button className="btn small" onClick={() => act(() => api(`/api/tournaments/${t.id}/roster-lock`, { body: { locked: true } }), 'Rosters locked')}>Lock rosters</button>
-              <button className="btn small ghost" onClick={() => act(() => api(`/api/tournaments/${t.id}/roster-lock`, { body: { locked: false } }), 'Rosters unlocked')}>Unlock</button>
-            </div>
-          )}
+          <div className="row">
+            {canRemind && signedUp.length > 0 && (
+              <ConfirmButton className="btn small primary" label="📨 Send availability check to all" confirm="DM every registered player the start reminder now, with the “Can you still make it?” buttons? Players who turned off bot DMs or muted this tournament are skipped." onConfirm={() => remind(null)} />
+            )}
+            {t.config.registrationMode === 'team' && t.teamSize > 1 && !started && (
+              <>
+                <button className="btn small" onClick={() => act(() => api(`/api/tournaments/${t.id}/roster-lock`, { body: { locked: true } }), 'Rosters locked')}>Lock rosters</button>
+                <button className="btn small ghost" onClick={() => act(() => api(`/api/tournaments/${t.id}/roster-lock`, { body: { locked: false } }), 'Rosters unlocked')}>Unlock</button>
+              </>
+            )}
+          </div>
         </div>
         {signedUp.length > 0 && !started && (
           <div className="row small" style={{ marginBottom: 10, gap: 8 }}>
-            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
+            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. You can send that reminder now with the buttons here (to everyone, or 📨 Send next to a player). Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
             {availCounts.map(([s, n]) => <span key={s} className="row" style={{ gap: 4 }}><AvailabilityBadge status={s} /> {n}</span>)}
           </div>
         )}
@@ -266,6 +277,9 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
                                   <option value="confirmed">Confirmed</option>
                                   <option value="declined">Can’t make it</option>
                                 </select>
+                              )}
+                              {canRemind && (
+                                <button className="btn small ghost" disabled={busy} title="DM the start reminder with the “Can you still make it?” buttons" onClick={() => void remind(m.userId, m.name ?? e.name)}>📨 Send</button>
                               )}
                             </div>
                           ))}

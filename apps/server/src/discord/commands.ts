@@ -52,6 +52,7 @@ export const COMMANDS = [
         { type: CHANNEL, name: 'channel', description: 'Text channel for the vote cards', channel_types: [0, 5] },
         { type: INTEGER, name: 'votes', description: 'Matching votes needed (default 2)', min_value: 1, max_value: 6 },
         { type: BOOLEAN, name: 'both_teams', description: 'Votes must include a player from each team (default on)' },
+        { type: BOOLEAN, name: 'pings', description: 'Ping the players when their card is posted (default on)' },
         { type: BOOLEAN, name: 'off', description: 'Turn vote cards off' },
       ]),
     ],
@@ -180,6 +181,6 @@ export const SETTING_SUGGESTIONS = [
   'singleElim.thirdPlaceMatch', 'doubleElim.grandFinalReset', 'swiss.rounds', 'roundRobin.encounters', 'sixmans.poolCount', 'sixmans.skillMethod',
   'sixmans.roundsMode', 'sixmans.gamesPerPlayer', 'sixmans.roundsPerPool', 'sixmans.skillBalancedTeams', 'sixmans.groupBestOf', 'sixmans.finalsBestOf', 'sixmans.qualifiersPerPool', 'sixmans.qualifierAdjustment',
   'notifications.channelAnnouncements', 'notifications.dms', 'notifications.announcementChannelId', 'notifications.startReminderHours', 'notifications.matchReminders',
-  'scoreReports.channelId', 'scoreReports.votesNeeded', 'scoreReports.requireBothTeams', 'voice.lobbyChannelId', 'voice.lobbySeconds',
+  'scoreReports.channelId', 'scoreReports.votesNeeded', 'scoreReports.requireBothTeams', 'scoreReports.mentionPlayers', 'voice.lobbyChannelId', 'voice.lobbySeconds',
   'sixmans.poolShuffleTolerance', 'voice.enabled', 'voice.moveConnectedPlayers', 'voice.visibleToParticipants', 'voice.categoryId', 'teamSize', 'registrationMode', 'format',
 ];

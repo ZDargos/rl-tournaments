@@ -58,7 +58,7 @@ function renderCard(ctx: AppContext, t: LoadedTournament, m: MatchRow, mode: 'op
   const need = `${rules.votesNeeded} matching vote${rules.votesNeeded === 1 ? '' : 's'}${rules.requireBothTeams && rules.votesNeeded > 1 ? ', including one from each team' : ''}`;
   return {
     content: `${head}\n${teams}\nPlayers: when the game is over, tap the team that won. Needs ${need}. You can change your vote until it counts.\nVotes: 🔵 ${tally.a} · 🟠 ${tally.b}`,
-    mentionUserIds: [...a, ...b],
+    mentionUserIds: rules.mentionPlayers ? [...a, ...b] : [],
     buttons: [
       { customId: cardCustomId(m.id, 'a'), label: `🔵 ${nameA} won`.slice(0, 80), style: 'primary' },
       { customId: cardCustomId(m.id, 'b'), label: `🟠 ${nameB} won`.slice(0, 80), style: 'danger' },

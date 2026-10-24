@@ -194,11 +194,12 @@ async function route(ctx: AppContext, i: BotInteraction): Promise<BotReply> {
       else if (typeof i.options.channel === 'string') patch.channelId = i.options.channel;
       if (optNum(i, 'votes') != null) patch.votesNeeded = optNum(i, 'votes');
       if (optBool(i, 'both_teams') != null) patch.requireBothTeams = optBool(i, 'both_teams');
+      if (optBool(i, 'pings') != null) patch.mentionPlayers = optBool(i, 'pings');
       const u = Object.keys(patch).length ? await updateTournament(ctx, uid, t.id, { configPatch: { scoreReports: patch } }, src) : t;
       const sr = u.cfg.scoreReports;
       return reply(
         sr.channelId
-          ? `✅ Vote cards for live matches of **${esc(u.name)}** go to <#${sr.channelId}>. A result counts after ${sr.votesNeeded} matching vote(s)${sr.requireBothTeams && sr.votesNeeded > 1 ? ', with at least one from each team' : ''}.`
+          ? `✅ Vote cards for live matches of **${esc(u.name)}** go to <#${sr.channelId}>. A result counts after ${sr.votesNeeded} matching vote(s)${sr.requireBothTeams && sr.votesNeeded > 1 ? ', with at least one from each team' : ''}. Players ${sr.mentionPlayers ? 'are' : 'are not'} pinged.`
           : `Vote cards are off for **${esc(u.name)}**. Turn them on with \`/tourney score-channel tournament:${u.id} channel:#channel\`.`,
       );
     }

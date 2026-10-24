@@ -257,6 +257,8 @@ export const configSchema = z.object({
       votesNeeded: z.number().int().min(1).max(6).default(2),
       /** The votes must include at least one player from each team (so one team cannot report its own win alone). */
       requireBothTeams: z.boolean().default(true),
+      /** Ping the match's players when their card is posted. Off: their names still show, without a notification. */
+      mentionPlayers: z.boolean().default(true),
     })
     .prefault({}),
 });

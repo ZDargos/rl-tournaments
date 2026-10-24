@@ -6,7 +6,7 @@ import { DomainError, FORMATS, NOTIFICATION_CATEGORIES, RANKS, STATES, type Tran
 import type { AppContext } from '../services/context.js';
 import { oauthConfigured } from '../env.js';
 import { authorizeUrl, handleCallback, OAUTH_SCOPES, type FetchLike } from '../auth/oauth.js';
-import { setAvailability } from '../services/availability.js';
+import { sendAvailabilityCheck, setAvailability } from '../services/availability.js';
 import { createSession, destroySession, redeemLoginCode, resolveSession } from '../auth/sessions.js';
 import type { UserRow } from '../services/users.js';
 import { ensureUser, listMutes, publicUser, setMute, setPreferences, upsertUser } from '../services/users.js';
@@ -270,7 +270,9 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
   app.get('/api/tournaments/:id/version', async (req) => {
     const t = loadTournament(ctx, id.parse((req.params as { id: string }).id));
     await assertView(ctx, t, req.user?.id ?? null);
-    return { version: t.version, state: t.state, stage: t.stage };
+    // A reminder reaching a player changes their availability without a new tournament version.
+    const asked = ctx.db.prepare('SELECT MAX(updated_at) AS at FROM availability WHERE tournament_id = ?').get(t.id) as { at: string | null };
+    return { version: t.version, state: t.state, stage: t.stage, availability: asked.at };
   });
   app.patch('/api/tournaments/:id', async (req) => {
     const b = z.object({ name: z.string().optional(), description: z.string().max(4000).optional(), visibility: z.enum(['public', 'private']).optional(), configPatch: z.record(z.string(), z.unknown()).optional(), expectedVersion: z.number().int().optional() }).parse(req.body);
@@ -352,6 +354,10 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     const b = z.object({ answer: z.enum(['confirmed', 'declined']), userId: z.string().regex(/^\d{5,25}$/).nullish() }).parse(req.body);
     const answer = await setAvailability(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.userId ?? null, b.answer, src);
     return { answer };
+  });
+  app.post('/api/tournaments/:id/availability-check', async (req) => {
+    const b = z.object({ userId: snowflake.nullish() }).parse(req.body ?? {});
+    return sendAvailabilityCheck(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.userId ?? null, src);
   });
   app.post('/api/tournaments/:id/my-rank', async (req) => {
     const b = z.object({ rank: z.string(), division: z.number().int().min(1).max(4).nullish() }).parse(req.body);
