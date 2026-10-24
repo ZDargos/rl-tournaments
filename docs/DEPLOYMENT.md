@@ -91,7 +91,7 @@ Turn off sleep on the machine, or it stops answering.
 2. Open **Settings → Secrets and variables → Actions → Variables** and add the variable `VITE_API_URL` = your `PUBLIC_API_URL`.
    - This is a public address, not a secret, and it ends up in the browser bundle by design.
    - Never add the bot token or client secret to GitHub.
-3. Push to `main`. The **Deploy website** workflow builds `apps/web` and publishes it, and the site appears at `https://<you>.github.io/<repo>/`.
+3. Push to `main`. The **Deploy website** workflow builds `apps/web` and publishes it, and the site appears at `https://<you>.github.io/<repo>/`. Until `VITE_API_URL` is set the site still deploys and shows a "not connected to a tournament server yet" notice; after setting it, re-run the workflow.
 4. Put that URL in `WEB_URL` in `.env` and restart the server. CORS only allows this origin, and login redirects back to it.
 
 The site uses hash URLs (`/#/t/12`), so deep links work on GitHub Pages without server rewrites.

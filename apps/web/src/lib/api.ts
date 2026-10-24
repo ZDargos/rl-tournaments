@@ -2,7 +2,10 @@
  * API client. The website is static (GitHub Pages); all data and every permission check live on the
  * backend. The only thing stored in the browser is our own session token (never a Discord token).
  */
-export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '') || 'http://localhost:8787';
+const CONFIGURED_API = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/+$/, '');
+export const API_URL: string = CONFIGURED_API || 'http://localhost:8787';
+/** True for a public deployment built without VITE_API_URL: there is no server to talk to yet. */
+export const API_MISSING = !CONFIGURED_API && !['localhost', '127.0.0.1'].includes(location.hostname);
 
 const TOKEN_KEY = 'rlt.session';
 

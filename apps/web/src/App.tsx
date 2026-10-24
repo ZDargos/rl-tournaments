@@ -1,3 +1,4 @@
+import { API_MISSING } from './lib/api';
 import { useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/auth';
@@ -45,7 +46,11 @@ export function App() {
       </header>
       <main>
         <div className="container">
-          {serverDown && (
+          {API_MISSING ? (
+            <div className="alert warn" style={{ marginBottom: 16 }}>
+              This website is not connected to a tournament server yet. The site owner needs to run the server and set the <code>VITE_API_URL</code> repository variable (see docs/DEPLOYMENT.md).
+            </div>
+          ) : serverDown && (
             <div className="alert warn" style={{ marginBottom: 16 }}>
               The tournament server is not reachable right now. It may be restarting or the host computer may be offline. Pages will load again once it is back.
             </div>
