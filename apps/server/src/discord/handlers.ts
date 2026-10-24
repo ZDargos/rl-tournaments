@@ -18,6 +18,7 @@ import { assertManage, loadTournament } from '../services/access.js';
 import { discordTime, escapeDiscord } from '../lib/util.js';
 import { zonedToUtc } from '../lib/tz.js';
 import { SETTING_SUGGESTIONS } from './commands.js';
+import { setAvailability } from '../services/availability.js';
 
 /** Platform-neutral view of a Discord interaction (built by bot.ts from discord.js objects). */
 export interface BotInteraction {
@@ -610,6 +611,13 @@ async function handleButton(ctx: AppContext, i: BotInteraction): Promise<BotRepl
     if (r.outcome === 'disputed') return reply('⚠️ The votes disagree, so the organizers were asked to set the result.');
     if (r.outcome === 'unchanged') return reply(`You already voted ${team}. Votes so far: 🔵 ${r.tally.a} · 🟠 ${r.tally.b}.`);
     return reply(`🗳️ Vote counted for ${team}. Votes so far: 🔵 ${r.tally.a} · 🟠 ${r.tally.b}.`);
+  }
+  if (kind === 'avail') {
+    const t = loadTournament(ctx, Number(a));
+    const answer = await setAvailability(ctx, i.user.id, t.id, null, b === 'no' ? 'declined' : 'confirmed', src);
+    return reply(answer === 'confirmed'
+      ? `✅ Thanks! The organizers of **${esc(t.name)}** know you can make it. Changed your mind? Tap the other button.`
+      : `Got it, the organizers of **${esc(t.name)}** know you can't make it.${t.cfg.registration.allowWithdrawal ? ` If you won't play, please also withdraw so someone else can take your spot: \`/reg leave tournament:${t.id}\` in the server.` : ''}`);
   }
   if (kind === 'inv') {
     await respondInvitation(ctx, i.user.id, Number(b), a === 'accept', src);

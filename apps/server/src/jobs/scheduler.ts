@@ -1,6 +1,7 @@
 import type { AppContext } from '../services/context.js';
 import { nowIso } from '../services/context.js';
-import { dispatchDue, enqueue, recoverProcessing } from '../services/notifications.js';
+import { dispatchDue, enqueue, recoverProcessing, scheduleTournamentReminders } from '../services/notifications.js';
+import { flagNoReplies } from '../services/availability.js';
 import { autoConfirmDue } from '../services/results.js';
 import { expireInvitations } from '../services/registration.js';
 import { reconcileAll, reconcileLobbies } from '../services/voice.js';
@@ -31,6 +32,7 @@ export class JobRunner {
     const recovered = recoverProcessing(this.ctx);
     if (recovered) this.ctx.log.info({ recovered }, 'recovered in-flight notifications');
     await reconcileAll(this.ctx, true);
+    this.rescheduleReminders();
     await this.tick();
   }
 
@@ -55,6 +57,7 @@ export class JobRunner {
       await this.autoStarts();
       autoConfirmDue(ctx);
       expireInvitations(ctx);
+      flagNoReplies(ctx);
       let sent = 0;
       do sent = await dispatchDue(ctx, 25);
       while (sent === 25);
@@ -68,6 +71,18 @@ export class JobRunner {
       ctx.log.error({ err: String(err), stack: (err as Error).stack }, 'job tick failed');
     } finally {
       this.running = false;
+    }
+  }
+
+  /** Bring every upcoming tournament's reminders in line with the current rules (idempotent). */
+  private rescheduleReminders() {
+    const rows = this.ctx.db.prepare("SELECT id FROM tournaments WHERE state IN ('published','registration_open','registration_closed','ready') AND start_at IS NOT NULL").all() as { id: number }[];
+    for (const r of rows) {
+      try {
+        scheduleTournamentReminders(this.ctx, loadTournament(this.ctx, r.id));
+      } catch (err) {
+        this.ctx.log.warn({ err: String(err), tournamentId: r.id }, 'rescheduling reminders failed');
+      }
     }
   }
 

@@ -4,7 +4,7 @@ import { RANKS } from '@rl/core';
 import { api, downloadCsv } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync, useLive } from '../lib/hooks';
-import { Empty, ErrorBox, Field, MatchBadge, Spinner, StateBadge, Tabs, useToast, ConfirmButton } from '../components/ui';
+import { AvailabilityBadge, Empty, ErrorBox, Field, MatchBadge, Spinner, StateBadge, Tabs, useToast, ConfirmButton } from '../components/ui';
 import { BracketView, MatchCard, MatchList, RoundsView } from '../components/matches';
 import { SixmansStandings, StandingsTable } from '../components/standings';
 import { MemberPicker } from '../components/MemberPicker';
@@ -215,6 +215,14 @@ function RegistrationPanel({ d, reload }: { d: any; reload: () => void }) {
               </select>
             </Field>
           )}
+          {!t.startedAt && t.state !== 'cancelled' && d.viewer.availability && (
+            <div className="row" style={{ gap: 8 }}>
+              <span className="small">Can you make it{t.startAt ? ` on ${fmtDate(t.startAt)}` : ''}?</span>
+              <AvailabilityBadge status={d.viewer.availability} />
+              <button className="btn small blue" disabled={busy || d.viewer.availability === 'confirmed'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'confirmed' } }), 'Thanks, the organizers know you can make it')}>I can make it</button>
+              <button className="btn small ghost" disabled={busy || d.viewer.availability === 'declined'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'declined' } }), 'The organizers know you can’t make it')}>I can’t make it</button>
+            </div>
+          )}
           <div className="row">
             {t.config.checkIn.enabled && !myEntry.checkedIn && myEntry.status === 'confirmed' && (
               <button className="btn primary" disabled={busy || !checkInOpen} onClick={() => void act(() => api(`/api/tournaments/${t.id}/check-in`, { body: {} }), 'Checked in')}>
@@ -295,7 +303,7 @@ function Participants({ d }: { d: any }) {
             <h3 style={{ textTransform: 'capitalize' }}>{g} ({es.length})</h3>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>#</th><th>{d.tournament.teamSize > 1 && d.tournament.config.registrationMode === 'team' ? 'Team' : 'Player'}</th><th>Roster</th><th>Check-in</th></tr></thead>
+                <thead><tr><th>#</th><th>{d.tournament.teamSize > 1 && d.tournament.config.registrationMode === 'team' ? 'Team' : 'Player'}</th><th>Roster</th><th>Check-in</th>{d.viewer.canManage && !d.tournament.startedAt && <th>Can make it?</th>}</tr></thead>
                 <tbody>
                   {es.map((e: any, i: number) => (
                     <tr key={e.id} className={e.id === d.viewer.entryId ? 'highlight' : ''}>
@@ -303,6 +311,9 @@ function Participants({ d }: { d: any }) {
                       <td style={{ fontWeight: 650 }}>{e.kind === 'player' ? <Link to={`/p/${e.userId}`}>{e.name}</Link> : e.name}</td>
                       <td className="small">{e.kind === 'team' ? e.members.map((m: any) => `${m.name}${m.role === 'substitute' ? ' (sub)' : ''}`).join(', ') : '—'}</td>
                       <td>{d.tournament.config.checkIn.enabled ? (e.checkedIn ? '✅' : '—') : 'n/a'}</td>
+                      {d.viewer.canManage && !d.tournament.startedAt && (
+                        <td>{e.kind === 'team' ? <div className="row" style={{ gap: 4 }}>{e.members.map((m: any) => <span key={m.userId} title={m.name}><AvailabilityBadge status={m.availability} /></span>)}</div> : <AvailabilityBadge status={e.availability} />}</td>
+                      )}
                     </tr>
                   ))}
                 </tbody>

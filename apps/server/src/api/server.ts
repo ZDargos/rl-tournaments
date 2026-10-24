@@ -6,6 +6,7 @@ import { DomainError, FORMATS, NOTIFICATION_CATEGORIES, RANKS, STATES, type Tran
 import type { AppContext } from '../services/context.js';
 import { oauthConfigured } from '../env.js';
 import { authorizeUrl, handleCallback, OAUTH_SCOPES, type FetchLike } from '../auth/oauth.js';
+import { setAvailability } from '../services/availability.js';
 import { createSession, destroySession, redeemLoginCode, resolveSession } from '../auth/sessions.js';
 import type { UserRow } from '../services/users.js';
 import { ensureUser, listMutes, publicUser, setMute, setPreferences, upsertUser } from '../services/users.js';
@@ -346,6 +347,11 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     const b = z.object({ entryId: z.number().int().positive().nullish() }).parse(req.body ?? {});
     const e = await checkIn(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.entryId ?? null, src);
     return { entryId: e.id, checkedIn: !!e.checked_in_at };
+  });
+  app.post('/api/tournaments/:id/availability', async (req) => {
+    const b = z.object({ answer: z.enum(['confirmed', 'declined']), userId: z.string().regex(/^\d{5,25}$/).nullish() }).parse(req.body);
+    const answer = await setAvailability(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.userId ?? null, b.answer, src);
+    return { answer };
   });
   app.post('/api/tournaments/:id/my-rank', async (req) => {
     const b = z.object({ rank: z.string(), division: z.number().int().min(1).max(4).nullish() }).parse(req.body);

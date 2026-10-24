@@ -5,6 +5,7 @@ import { getGuild, guildDto } from './guilds.js';
 import { notificationLog, unreachablePlayers } from './notifications.js';
 import { competitorsOf, matchesOf, matchLabel, membersByCompetitor, type MatchRow } from './queries.js';
 import { entriesOf, entryMembers, entryForUser } from './registration.js';
+import { availabilityOf } from './availability.js';
 import { userNames } from './users.js';
 import { checkStart, standardStandings, swissTotalRounds } from './engine.js';
 import { currentPlan, poolStandings, qualifiersPerPool } from './sixmans.js';
@@ -83,11 +84,15 @@ export async function tournamentDetail(ctx: AppContext, id: number, viewerId: st
   const matches = matchesOf(ctx, t.id).map((m) => matchDto(ctx, m, compNames, members, names, poolNames));
   const visibleEntries = entries.filter((e) => manage || ['confirmed', 'pending', 'waitlisted'].includes(e.status));
   const showSkill = manage; // skill inputs are organizer-only
+  // Availability is for organizers (and each player sees their own).
+  const avail = availabilityOf(ctx, t);
+  const availOf = (userId: string) => (manage || userId === viewerId ? avail.get(userId)?.status ?? 'not_asked' : undefined);
   const entryDtos = visibleEntries.map((e) => ({
     id: e.id, kind: e.kind, name: e.kind === 'team' ? e.name : names.get(e.user_id!) ?? 'Player', userId: e.user_id, captainId: e.captain_id, status: e.status,
     checkedIn: !!e.checked_in_at, rosterLocked: !!e.roster_locked, createdAt: e.created_at,
     seed: showSkill ? e.seed : null, rank: showSkill || e.user_id === viewerId ? e.rank : null, rankLabel: (showSkill || e.user_id === viewerId) && e.rank ? rankLabel(e.rank, e.rank_division) : null, division: showSkill ? e.rank_division : null,
-    members: (memberRows.get(e.id) ?? []).map((m) => ({ userId: m.user_id, name: names.get(m.user_id) ?? 'Player', role: m.role })),
+    members: (memberRows.get(e.id) ?? []).map((m) => ({ userId: m.user_id, name: names.get(m.user_id) ?? 'Player', role: m.role, availability: availOf(m.user_id) })),
+    availability: e.kind === 'player' ? availOf(e.user_id!) : undefined,
   }));
   let standings: unknown = null;
   if ((t.format === 'swiss' || t.format === 'round_robin') && t.started_at) {
@@ -136,7 +141,7 @@ export async function tournamentDetail(ctx: AppContext, id: number, viewerId: st
       swissRounds: t.format === 'swiss' && t.started_at ? swissTotalRounds(ctx, t) : null,
     },
     guild: guild ? { id: guild.id, name: guild.name, iconUrl: guild.iconUrl, botPresent: guild.botPresent } : null,
-    viewer: { userId: viewerId, role: access.role, canManage: manage, isCreator: access.isCreator, entryId: myEntry?.id ?? null, myMatchIds: myMatches, muted },
+    viewer: { userId: viewerId, role: access.role, canManage: manage, isCreator: access.isCreator, entryId: myEntry?.id ?? null, myMatchIds: myMatches, muted, availability: viewerId && myEntry ? avail.get(viewerId)?.status ?? 'not_asked' : null },
     entries: entryDtos,
     competitors: comps.map((c) => ({ id: c.id, name: c.name, seed: c.seed, kind: c.kind, stage: c.stage, players: (members.get(c.id) ?? []).map((x) => ({ userId: x.userId, name: names.get(x.userId) ?? 'Player', role: x.role })) })),
     matches,
