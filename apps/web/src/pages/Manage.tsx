@@ -43,7 +43,7 @@ export function ManagePage() {
         </div>
       </div>
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
-      {tab === 'control' && <Control d={d} reload={reload} />}
+      {tab === 'control' && <Control d={d} reload={reload} openSettings={() => setTab('settings')} />}
       {tab === 'settings' && <Settings d={d} reload={reload} />}
       {tab === 'entries' && <Entries d={d} reload={reload} />}
       {tab === 'sixmans' && <SixmansAdmin d={d} reload={reload} />}
@@ -54,7 +54,7 @@ export function ManagePage() {
   );
 }
 
-function Control({ d, reload }: { d: any; reload: () => void }) {
+function Control({ d, reload, openSettings }: { d: any; reload: () => void; openSettings: () => void }) {
   const t = d.tournament;
   const m = d.manager;
   const toast = useToast();
@@ -74,7 +74,7 @@ function Control({ d, reload }: { d: any; reload: () => void }) {
           <h3>Lifecycle</h3>
           <p className="muted small">Draft → Published → Registration open → Registration closed → In progress → Completed. Format and structure lock when the tournament starts.</p>
           <div className="row">
-            {m.availableActions.filter((a: string) => a !== 'cancel' && !(a === 'open_registration' && d.startPoll?.status === 'open')).map((a: TransitionAction) =>
+            {m.availableActions.filter((a: string) => a !== 'cancel' && !(['open_registration', 'unpublish'].includes(a) && d.startPoll?.status === 'open')).map((a: TransitionAction) =>
               a === 'start' ? (
                 <ConfirmButton key={a} className="btn primary" label={ACTION_LABEL[a]} disabled={busy || (sc && !sc.ok)} confirm={`Start now? Brackets/pairings are generated and the format becomes locked.${sc?.warnings.length ? ` Warnings: ${sc.warnings.join(' ')}` : ''}`} onConfirm={() => act(a)} />
               ) : (
@@ -86,7 +86,7 @@ function Control({ d, reload }: { d: any; reload: () => void }) {
           <ErrorBox error={error} />
           {t.autoStartError && <div className="alert error" style={{ marginTop: 10 }}>Automatic start failed: {t.autoStartError.split('|').slice(1).join('|')}</div>}
         </div>
-        <StartPollAdmin d={d} reload={reload} />
+        <StartPollAdmin d={d} reload={reload} openSettings={openSettings} />
         {sc && (
           <div className="card">
             <h3>Start checklist</h3>
@@ -154,7 +154,7 @@ function Settings({ d, reload }: { d: any; reload: () => void }) {
         </div>
         <div style={{ marginTop: 12 }}><Field help={HELP.description} label="Description"><textarea value={description} onChange={(e) => setDescription(e.target.value)} maxLength={4000} /></Field></div>
       </div>
-      <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} playerCount={d.entries.filter((e: any) => e.status === 'confirmed').length} /></div>
+      <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} playerCount={d.entries.filter((e: any) => e.status === 'confirmed').length} startVote={{ allowed: ['draft', 'published'].includes(t.state), running: d.startPoll?.status === 'open' ? d.startPoll.options.map((o: any) => o.at) : [] }} /></div>
       <ErrorBox error={error} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
         <button className="btn primary" disabled={busy} onClick={async () => {

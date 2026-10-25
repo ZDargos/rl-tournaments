@@ -155,4 +155,92 @@ describe('channel cleanup when a tournament ends', () => {
     await other.s.settle();
     expect(other.s.discord.sent.filter((m) => m.kind === 'channel').every((m) => other.s.discord.messages.has(m.id!))).toBe(true);
   });
+
+  it('"Vote on date first" in settings: the vote goes live on publish, can gain times, and ends the setting', async () => {
+    const s = await setup();
+    const admin = await s.login(1, { admin: true, name: 'host' });
+    const hours = (h: number) => new Date(s.clock.t + h * 3600_000).toISOString();
+    const options = [hours(72), hours(48)];
+    const t = ok(await admin.post('/api/tournaments', {
+      guildId: GUILD, name: 'Settings Vote Cup',
+      config: { format: 'single_elim', teamSize: 1, notifications: { announcementChannelId: ANNOUNCE, registrationChannelId: REG }, schedule: { startAt: hours(10), autoStart: true, startVote: { enabled: true, options, closesAt: hours(24) } } },
+    })).body;
+    const tid = t.id as number;
+    const detail = async () => ok(await admin.get(`/api/tournaments/${tid}`)).body;
+    let d = await detail();
+    // A draft only stores the vote; the start time is left to the vote.
+    expect(d.startPoll).toBeNull();
+    expect(d.tournament.config.schedule.startAt).toBeNull();
+    await s.settle();
+    expect(s.discord.sent.some((m) => /When should/.test(m.content))).toBe(false);
+
+    const pub = ok(await admin.post(`/api/tournaments/${tid}/actions/publish`)).body;
+    expect(pub.state).toBe('published');
+    await s.settle();
+    d = await detail();
+    expect(d.startPoll.status).toBe('open');
+    // Listed in time order; index is the stored position.
+    expect(d.startPoll.options.map((o: any) => o.at)).toEqual([options[1], options[0]]);
+    const card = s.discord.sent.find((m) => m.kind === 'channel' && /When should/.test(m.content))!;
+    expect(card.target).toBe(REG);
+    expect(card.content).toContain(`Details and sign-up: <${s.ctx.env.WEB_URL}/#/t/${tid}>`);
+
+    // Back to draft is blocked while players vote.
+    expect((await admin.post(`/api/tournaments/${tid}/actions/unpublish`)).status).toBe(409);
+
+    const ps = await Promise.all([10, 11].map((n) => s.login(n, { name: `player${n}` })));
+    const first = d.startPoll.options[0].index;
+    ok(await ps[0].post(`/api/tournaments/${tid}/start-poll/vote`, { options: [first] }));
+
+    // Add a time while the vote runs: votes stay on their time, the card gains a button.
+    const cfg = d.tournament.config;
+    const extra = hours(36);
+    const patch = (startVote: Record<string, unknown>) => admin.patch(`/api/tournaments/${tid}`, { configPatch: { schedule: { startVote: { ...cfg.schedule.startVote, ...startVote } } } });
+    ok(await patch({ options: [...cfg.schedule.startVote.options, extra] }));
+    await s.settle();
+    d = await detail();
+    expect(d.startPoll.options.map((o: any) => o.at)).toEqual([extra, options[1], options[0]]);
+    expect(d.startPoll.options.find((o: any) => o.at === options[1]).votes).toBe(1);
+    expect(s.discord.messages.get(card.id!)!.buttons!.length).toBe(3);
+    ok(await ps[1].post(`/api/tournaments/${tid}/start-poll/vote`, { options: [d.startPoll.options[0].index, first] }));
+
+    // Removing a time or switching the vote off needs Cancel vote first.
+    expect((await patch({ options: [options[0], extra] })).status).toBe(409);
+    expect((await admin.patch(`/api/tournaments/${tid}`, { configPatch: { schedule: { autoStart: false, startVote: { enabled: false } } } })).status).toBe(409);
+    // A deadline in the past is refused.
+    expect((await patch({ options: [...options, extra], closesAt: hours(-1) })).status).toBe(400);
+
+    // Organizers can see who voted for each time.
+    const voters = (await detail()).startPoll.voters;
+    expect(voters.find((v: any) => v.userId === ps[1].id).options.sort()).toEqual([first, d.startPoll.options[0].index].sort());
+
+    ok(await admin.post(`/api/tournaments/${tid}/start-poll/close`, {}));
+    await s.settle();
+    d = await detail();
+    expect(d.tournament.state).toBe('registration_open');
+    expect(d.tournament.config.schedule.startAt).toBe(options[1]);
+    expect(d.tournament.config.schedule.startVote.enabled).toBe(false);
+    expect(s.discord.messages.get(card.id!)!.content).toContain(`<${s.ctx.env.WEB_URL}/#/t/${tid}>`);
+  });
+
+  it('publishing with a vote whose deadline has passed is refused with the reason', async () => {
+    const s = await setup();
+    const admin = await s.login(1, { admin: true, name: 'host' });
+    const hours = (h: number) => new Date(s.clock.t + h * 3600_000).toISOString();
+    const t = ok(await admin.post('/api/tournaments', {
+      guildId: GUILD, name: 'Late Vote Cup', config: { format: 'single_elim', teamSize: 1, schedule: { startVote: { enabled: true, options: [hours(48), hours(72)], closesAt: hours(2) } } },
+    })).body;
+    s.clock.advance(3 * 60);
+    const r = await admin.post(`/api/tournaments/${t.id}/actions/publish`);
+    expect(r.status).toBe(400);
+    expect(r.text).toMatch(/deadline has passed/);
+    expect(ok(await admin.get(`/api/tournaments/${t.id}`)).body.tournament.state).toBe('draft');
+    // Created with "Publish now", the vote goes live at once.
+    const t2 = ok(await admin.post('/api/tournaments', {
+      guildId: GUILD, name: 'Now Vote Cup', publish: true, config: { format: 'single_elim', teamSize: 1, schedule: { startVote: { enabled: true, options: [hours(48), hours(72)], closesAt: hours(24) } } },
+    })).body;
+    expect(ok(await admin.get(`/api/tournaments/${t2.id}`)).body.startPoll.status).toBe('open');
+    // Settings checks: times must come after the deadline.
+    expect((await admin.post('/api/tournaments', { guildId: GUILD, name: 'Bad Vote Cup', config: { schedule: { startVote: { enabled: true, options: [hours(5), hours(72)], closesAt: hours(24) } } } })).status).toBe(400);
+  });
 });

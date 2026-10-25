@@ -13,6 +13,7 @@ import { loadPreset, presetDiff, safeConfig, zodMessage } from './presets.js';
 import { ensureUser } from './users.js';
 import { startTournament, cancelOpenMatches } from './engine.js';
 import { lockRosters } from './registration.js';
+import { pollWarnings, voteOnPublish, voteOnSettingsChange } from './polls.js';
 
 /** JSON of the structural (locked-after-start) settings, compared by a database trigger. */
 export function structureOf(cfg: TournamentConfig): string {
@@ -58,6 +59,7 @@ export async function createTournament(ctx: AppContext, actorId: string, input: 
     throw err;
   }
   cfg = safeConfig(cfg);
+  const startVote = input.publish ? voteOnPublish(ctx, cfg) : null;
   const id = tx(ctx, () => {
     const now = nowIso(ctx);
     const r = ctx.db
@@ -72,8 +74,10 @@ export async function createTournament(ctx: AppContext, actorId: string, input: 
     const tid = Number(r.lastInsertRowid);
     audit(ctx, { guildId: g.id, tournamentId: tid, actorId, action: 'tournament.created', details: { name, format: cfg.format, presetId: input.presetId ?? null, source } });
     scheduleTournamentReminders(ctx, loadTournament(ctx, tid));
+    startVote?.(loadTournament(ctx, tid), actorId, source);
     return tid;
   });
+  if (startVote) ctx.kick(id);
   return loadTournament(ctx, id);
 }
 
@@ -115,13 +119,16 @@ export async function updateTournament(ctx: AppContext, actorId: string, id: num
   }
   const name = input.name?.trim() ?? t.name;
   if (name.length < 3 || name.length > 80) throw invalid('bad_name', 'Tournament names must be 3-80 characters.');
+  const voteStep = isStarted(t.state) ? null : voteOnSettingsChange(ctx, t, cfg);
   tx(ctx, () => {
     ctx.db
       .prepare(
         `UPDATE tournaments SET name = ?, description = ?, visibility = ?, format = ?, config = ?, structure = ?, start_at = ?, timezone = ?,
           version = version + 1, updated_at = ? WHERE id = ?`,
       )
-      .run(name, (input.description ?? t.description).slice(0, 4000), input.visibility ?? t.visibility, cfg.format, JSON.stringify(cfg), structureOf(cfg), cfg.schedule.startAt, cfg.schedule.timezone, nowIso(ctx), id);
+      // After the start the structure cannot change (checked above), so keep the stored snapshot: a
+      // setting added since then would otherwise make it differ and trip the database lock.
+      .run(name, (input.description ?? t.description).slice(0, 4000), input.visibility ?? t.visibility, cfg.format, JSON.stringify(cfg), isStarted(t.state) ? t.structure : structureOf(cfg), cfg.schedule.startAt, cfg.schedule.timezone, nowIso(ctx), id);
     if (changes.some((c) => c.path.startsWith('sixmans') || c.path === 'format')) {
       // Pool/schedule proposals were built for the old settings.
       ctx.db.prepare("DELETE FROM sixmans_plans WHERE tournament_id = ? AND kind IN ('schedule','finals')").run(id);
@@ -131,6 +138,7 @@ export async function updateTournament(ctx: AppContext, actorId: string, id: num
       details: { source, name: name !== t.name ? name : undefined, visibility: input.visibility, changes: changes.map((c) => ({ path: c.path, before: c.before, after: c.after })) },
     });
     if (changes.some((c) => c.path.startsWith('schedule') || c.path.startsWith('checkIn') || c.path.startsWith('notifications'))) scheduleTournamentReminders(ctx, loadTournament(ctx, id));
+    voteStep?.(loadTournament(ctx, id), actorId, source);
   });
   ctx.kick(id);
   return loadTournament(ctx, id);
@@ -151,7 +159,7 @@ export async function applyPreset(ctx: AppContext, actorId: string, id: number, 
   if (isStarted(t.state) || t.state === 'cancelled') throw conflict('format_locked', 'Presets can only be applied before the tournament starts.');
   const p = loadPreset(ctx, presetId, t.guild_id);
   const presetCfg = parseConfig(JSON.parse(p.config));
-  const merged = safeConfig({ ...presetCfg, schedule: { ...presetCfg.schedule, startAt: t.cfg.schedule.startAt } });
+  const merged = safeConfig({ ...presetCfg, schedule: { ...presetCfg.schedule, startAt: t.cfg.schedule.startAt, startVote: t.cfg.schedule.startVote } });
   const changes = diffConfig(t.cfg, merged);
   tx(ctx, () => {
     ctx.db
@@ -170,7 +178,11 @@ export async function transition(ctx: AppContext, actorId: string | null, id: nu
   if (actorId) await assertManage(ctx, t, actorId);
   if (action === 'open_registration' && !opts.fromPoll && ctx.db.prepare("SELECT 1 FROM start_polls WHERE tournament_id = ? AND status = 'open'").get(id))
     throw conflict('start_poll_open', 'Players are still voting on the start time. Registration opens when the vote closes (or close the vote now).');
+  if (action === 'unpublish' && ctx.db.prepare("SELECT 1 FROM start_polls WHERE tournament_id = ? AND status = 'open'").get(id))
+    throw conflict('start_poll_open', 'Players are voting on the start time. Cancel the vote before moving the tournament back to draft.');
   if (action === 'start') return startTournament(ctx, actorId, id, { source: opts.source ?? 'web' });
+  // "Vote on date first": the vote goes live with the publish, or the publish is refused with the reason.
+  const startVote = action === 'publish' ? voteOnPublish(ctx, t.cfg) : null;
   if (action === 'complete') throw invalid('not_allowed', 'Tournaments complete automatically when the champion is decided.');
   const to = nextState(t.state, action);
   tx(ctx, () => {
@@ -185,6 +197,7 @@ export async function transition(ctx: AppContext, actorId: string | null, id: nu
     audit(ctx, { guildId: t.guild_id, tournamentId: id, actorId, action: `tournament.${action}`, details: { from: t.state, to, reason: opts.reason, source: opts.source } });
     const fresh = loadTournament(ctx, id);
     if (action === 'open_registration') enqueue(ctx, { tournamentId: id, category: 'registration_open', key: `t${id}:regopen:${now}`, audience: 'participants' });
+    startVote?.(fresh, actorId, opts.source ?? 'web');
     if (action === 'close_registration') {
       enqueue(ctx, { tournamentId: id, category: 'registration_close', key: `t${id}:regclose:${now}`, audience: 'participants' });
       if (fresh.cfg.registration.rosterLock === 'on_registration_close') lockRosters(ctx, fresh, null);
@@ -201,7 +214,8 @@ export async function transition(ctx: AppContext, actorId: string | null, id: nu
     scheduleTournamentReminders(ctx, fresh);
   });
   ctx.kick(id);
-  return { tournament: loadTournament(ctx, id), warnings: [] as string[] };
+  const fresh = loadTournament(ctx, id);
+  return { tournament: fresh, warnings: startVote ? pollWarnings(ctx, fresh) : ([] as string[]) };
 }
 
 export async function addAdmin(ctx: AppContext, actorId: string, id: number, userId: string, source: Source) {

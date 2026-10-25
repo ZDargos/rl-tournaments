@@ -34,6 +34,11 @@ export function safeConfig(input: unknown): TournamentConfig {
   }
 }
 
+/** A start time vote has fixed dates, so it belongs to one tournament and is never saved in a preset. */
+function withoutVote(cfg: TournamentConfig): TournamentConfig {
+  return { ...cfg, schedule: { ...cfg.schedule, startVote: { enabled: false, options: [], closesAt: null } } };
+}
+
 async function assertPresetManager(ctx: AppContext, guildId: string, actorId: string) {
   const g = requireGuild(ctx, guildId);
   const m = await memberFacts(ctx, guildId, actorId);
@@ -74,7 +79,7 @@ export async function createPreset(ctx: AppContext, actorId: string, input: { gu
   await assertPresetManager(ctx, input.guildId, actorId);
   const name = input.name.trim();
   if (!name || name.length > 60) throw invalid('bad_name', 'Preset names must be 1-60 characters.');
-  const cfg = safeConfig(input.config);
+  const cfg = withoutVote(safeConfig(input.config));
   try {
     const id = tx(ctx, () => {
       const now = nowIso(ctx);
@@ -97,7 +102,7 @@ export async function updatePreset(ctx: AppContext, actorId: string, id: number,
   await assertPresetManager(ctx, existing.guild_id, actorId);
   const name = input.name?.trim() ?? existing.name;
   if (!name || name.length > 60) throw invalid('bad_name', 'Preset names must be 1-60 characters.');
-  const cfg = input.config !== undefined ? safeConfig(input.config) : parseConfig(JSON.parse(existing.config));
+  const cfg = withoutVote(input.config !== undefined ? safeConfig(input.config) : parseConfig(JSON.parse(existing.config)));
   const configChanged = JSON.stringify(cfg) !== JSON.stringify(parseConfig(JSON.parse(existing.config)));
   try {
     tx(ctx, () => {
@@ -135,7 +140,7 @@ export async function deletePreset(ctx: AppContext, actorId: string, id: number)
 
 /** Settings that would change if `preset` were applied to a tournament's config. */
 export function presetDiff(current: TournamentConfig, preset: TournamentConfig) {
-  // Scheduling details (start time) belong to the tournament, not the preset.
-  const merged = { ...preset, schedule: { ...preset.schedule, startAt: current.schedule.startAt } };
+  // Scheduling details (start time, start time vote) belong to the tournament, not the preset.
+  const merged = { ...preset, schedule: { ...preset.schedule, startAt: current.schedule.startAt, startVote: current.schedule.startVote } };
   return diffConfig(current, merged);
 }

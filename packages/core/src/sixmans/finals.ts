@@ -1,7 +1,8 @@
 import { invalid } from '../errors.js';
 import { tieKey } from '../rng.js';
-import { buildSingleElimination, nextPow2, type BracketMatch } from '../formats/bracket.js';
+import { buildDoubleElimination, buildSingleElimination, nextPow2, type BracketMatch } from '../formats/bracket.js';
 import type { PlayerStanding } from './standings.js';
+import type { FinalsTeamFormation } from '../config.js';
 
 export interface QualifierEntry {
   playerId: string;
@@ -105,28 +106,59 @@ export interface FinalsTeam {
   seed: number;
 }
 
+type TeamPlayer = { id: string; skill: number; order: number; pool?: number };
+
 /**
- * Form 3-player teams. "balanced": snake draft by skill then pairwise swaps that reduce the
- * variance of team skill totals, so no team stacks the top players. "standings_snake": snake
- * draft by group-stage finish (cross-pool order), no further balancing.
+ * Form 3-player teams.
+ * - balanced: snake draft by skill then pairwise swaps that reduce the variance of team skill totals,
+ *   so no team stacks the top players.
+ * - standings_snake: snake draft by group-stage finish (cross-pool order), no further balancing.
+ * - pool_snake / pool_balanced: the same two methods, run inside each pool, so every team's players
+ *   come from one pool. When a pool's finals players are not a multiple of 3 (an option added or
+ *   dropped players), its lowest finishers are left over and mixed into teams across pools.
  */
-export function formFinalsTeams(
-  players: { id: string; skill: number; order: number }[],
-  mode: 'balanced' | 'standings_snake',
-  seed: number,
-): FinalsTeam[] {
+export function formFinalsTeams(players: TeamPlayer[], mode: FinalsTeamFormation, seed: number): FinalsTeam[] {
   if (players.length % 3 !== 0 || players.length < 6) throw invalid('bad_finals_size', 'Finals need a multiple of 3 players (at least 6).');
+  let teams: TeamPlayer[][];
+  if (mode === 'pool_snake' || mode === 'pool_balanced') {
+    const base = mode === 'pool_snake' ? 'standings_snake' : 'balanced';
+    const byPool = new Map<number, TeamPlayer[]>();
+    for (const p of players) byPool.set(p.pool ?? 0, [...(byPool.get(p.pool ?? 0) ?? []), p]);
+    teams = [];
+    const leftovers: TeamPlayer[] = [];
+    for (const pool of [...byPool.keys()].sort((a, b) => a - b)) {
+      const ps = byPool.get(pool)!.slice().sort((a, b) => a.order - b.order);
+      const keep = ps.length - (ps.length % 3);
+      leftovers.push(...ps.slice(keep));
+      if (keep) teams.push(...groupTeams(ps.slice(0, keep), base, seed));
+    }
+    if (leftovers.length) teams.push(...groupTeams(leftovers, base, seed));
+  } else {
+    teams = groupTeams(players, mode, seed);
+  }
+  // Seed teams: higher total skill first, then better group-stage finish.
+  const built = teams.map((tm) => ({
+    players: tm.map((p) => p.id),
+    skill: tm.reduce((s, p) => s + p.skill, 0),
+    order: Math.min(...tm.map((p) => p.order)),
+  }));
+  built.sort((a, b) => b.skill - a.skill || a.order - b.order);
+  return built.map((b, i) => ({ key: `team${i + 1}`, name: `Team ${i + 1}`, players: b.players, skill: b.skill, seed: i + 1 }));
+}
+
+/** Split a multiple of 3 players into teams of 3 by snake draft (and, for balanced, skill balancing). */
+function groupTeams(players: TeamPlayer[], mode: 'balanced' | 'standings_snake', seed: number): TeamPlayer[][] {
   const t = players.length / 3;
   const sorted = players.slice().sort((a, b) =>
     mode === 'balanced' ? b.skill - a.skill || a.order - b.order || tieKey(a.id, seed) - tieKey(b.id, seed) : a.order - b.order,
   );
-  const teams: { id: string; skill: number; order: number }[][] = Array.from({ length: t }, () => []);
+  const teams: TeamPlayer[][] = Array.from({ length: t }, () => []);
   sorted.forEach((p, i) => {
     const roundIdx = Math.floor(i / t);
     const pos = i % t;
     teams[roundIdx % 2 === 0 ? pos : t - 1 - pos].push(p);
   });
-  if (mode === 'balanced') {
+  if (mode === 'balanced' && t > 1) {
     const total = (tm: { skill: number }[]) => tm.reduce((s, p) => s + p.skill, 0);
     const mean = total(sorted) / t;
     const cost = () => teams.reduce((s, tm) => s + (total(tm) - mean) ** 2, 0);
@@ -182,14 +214,7 @@ export function formFinalsTeams(
       }
     }
   }
-  // Seed teams: higher total skill first, then better group-stage finish.
-  const built = teams.map((tm) => ({
-    players: tm.map((p) => p.id),
-    skill: tm.reduce((s, p) => s + p.skill, 0),
-    order: Math.min(...tm.map((p) => p.order)),
-  }));
-  built.sort((a, b) => b.skill - a.skill || a.order - b.order);
-  return built.map((b, i) => ({ key: `team${i + 1}`, name: `Team ${i + 1}`, players: b.players, skill: b.skill, seed: i + 1 }));
+  return teams;
 }
 
 export function validateFinalsTeams(teams: { players: string[] }[], expectedPlayers: string[]): string[] {
@@ -223,6 +248,19 @@ export function handPickedOption(teams: { players: string[] }[], qualifiedIds: s
   };
 }
 
-export function buildFinalsBracket(teamKeysInSeedOrder: string[]): BracketMatch[] {
-  return buildSingleElimination(teamKeysInSeedOrder, { bracket: 'finals' });
+export interface FinalsBracketOptions {
+  format?: 'single_elim' | 'double_elim';
+  thirdPlace?: boolean;
+  grandFinalReset?: boolean;
+}
+
+/** Single elimination uses the "finals" bracket; double elimination the usual winners/losers/grand final. */
+export function buildFinalsBracket(teamKeysInSeedOrder: string[], opts: FinalsBracketOptions = {}): BracketMatch[] {
+  if (opts.format === 'double_elim') return buildDoubleElimination(teamKeysInSeedOrder, { grandFinalReset: opts.grandFinalReset });
+  return buildSingleElimination(teamKeysInSeedOrder, { bracket: 'finals', thirdPlace: opts.thirdPlace });
+}
+
+/** Elimination format of a built finals bracket. */
+export function finalsFormatOf(matches: { bracket: string }[]): 'single_elim' | 'double_elim' {
+  return matches.some((m) => m.bracket === 'losers' || m.bracket === 'grand_final') ? 'double_elim' : 'single_elim';
 }

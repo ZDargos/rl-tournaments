@@ -1,5 +1,5 @@
 import { randomInt } from 'node:crypto';
-import { conflict, forbidden, invalid, isPreStart, notFound, DomainError } from '@rl/core';
+import { conflict, forbidden, invalid, isPreStart, notFound, DomainError, MAX_START_VOTE_OPTIONS, type TournamentConfig } from '@rl/core';
 import type { AppContext, Source } from './context.js';
 import { nowIso, tx } from './context.js';
 import { assertManage, assertView, loadTournament, type LoadedTournament } from './access.js';
@@ -25,9 +25,9 @@ import { discordTime, escapeDiscord } from '../lib/util.js';
  * closes as soon as it is back.
  */
 
-export const MAX_POLL_OPTIONS = 10;
 const POSTING_STUCK_MS = 2 * 60_000;
 const NUMBERS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟'];
+const numberMark = (n: number) => NUMBERS[n - 1] ?? `**${n}.**`;
 
 interface PollRow {
   id: number;
@@ -99,51 +99,118 @@ export function pollView(ctx: AppContext, t: LoadedTournament, viewerId: string 
   }
   return {
     id: p.id, status: p.status, closesAt: p.closes_at, winner: p.winner, tie: !!p.tie, closedAt: p.closed_at,
-    options: optionsOf(p).map((at, i) => ({ at, votes: c[i], mine: mine.has(i) })),
+    // In time order; `index` is what votes and `winner` refer to.
+    options: byTime(optionsOf(p)).map((i) => ({ index: i, at: optionsOf(p)[i], votes: c[i], mine: mine.has(i) })),
     voterCount: (ctx.db.prepare('SELECT COUNT(DISTINCT user_id) c FROM start_poll_votes WHERE poll_id = ?').get(p.id) as { c: number }).c,
     cardPosted: p.card_status === 'posted', voters,
   };
 }
 
+/**
+ * Organizers set the vote up in the settings ("Vote on date first"). This endpoint (Manage → Control,
+ * older clients) writes the same settings; the vote goes live right away if the tournament is
+ * published, otherwise when it is published.
+ */
 export async function createPoll(ctx: AppContext, actorId: string, tournamentId: number, input: { options: string[]; closesAt: string }, source: Source) {
   const t = loadTournament(ctx, tournamentId);
   await assertManage(ctx, t, actorId);
   if (t.state !== 'draft' && t.state !== 'published') throw conflict('bad_state', 'Start a vote before registration opens (the vote opens registration when it closes).');
   if (openPoll(ctx, t.id)) throw conflict('start_poll_open', 'A start time vote is already running. Cancel it first to start a new one.');
-  const now = ctx.clock.now().getTime();
   const times = input.options.map((o) => {
     const ms = Date.parse(o);
     if (Number.isNaN(ms)) throw invalid('bad_time', 'One of the times is not a valid date and time.');
-    return ms;
+    return new Date(ms).toISOString();
   });
-  if (times.length < 2 || times.length > MAX_POLL_OPTIONS) throw invalid('bad_options', `Give between 2 and ${MAX_POLL_OPTIONS} start times.`);
-  if (new Set(times).size !== times.length) throw invalid('duplicate_option', 'The same start time is listed twice.');
   const closes = Date.parse(input.closesAt);
   if (Number.isNaN(closes)) throw invalid('bad_time', 'The voting deadline is not a valid date and time.');
-  if (closes <= now) throw invalid('bad_deadline', 'The voting deadline must be in the future.');
-  if (times.some((ms) => ms <= closes)) throw invalid('bad_deadline', 'Every start time must be after the voting deadline.');
-  const options = times.map((ms) => new Date(ms).toISOString());
-  const id = tx(ctx, () => {
-    const iso = nowIso(ctx);
-    const r = ctx.db
-      .prepare("INSERT INTO start_polls (tournament_id, options, closes_at, status, created_by, created_at, updated_at) VALUES (?, ?, ?, 'open', ?, ?, ?)")
-      .run(t.id, JSON.stringify(options), new Date(closes).toISOString(), actorId, iso, iso);
-    // No start time while players vote: no start reminders, no auto-start.
-    if (t.cfg.schedule.startAt) setStartAt(ctx, t, null);
-    bump(ctx, t.id);
-    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'start_poll.created', details: { options, closesAt: new Date(closes).toISOString(), source } });
-    return Number(r.lastInsertRowid);
-  });
-  ctx.kick(t.id);
-  const warnings: string[] = [];
-  if (t.state === 'draft') warnings.push('The tournament is still a draft, so only organizers can see it. Publish it so players can vote on the website.');
-  if (!tournamentChannel(ctx, t, 'registration')) warnings.push('No registration or announcement channel is set, so the vote is only on the website.');
-  return { id, warnings };
+  const { updateTournament } = await import('./tournaments.js');
+  await updateTournament(ctx, actorId, t.id, { configPatch: { schedule: { startVote: { enabled: true, options: times, closesAt: new Date(closes).toISOString() } } } }, source);
+  return { id: openPoll(ctx, t.id)?.id ?? null, warnings: pollWarnings(ctx, loadTournament(ctx, t.id)) };
 }
 
-function setStartAt(ctx: AppContext, t: LoadedTournament, startAt: string | null) {
-  const cfg = { ...t.cfg, schedule: { ...t.cfg.schedule, startAt } };
-  ctx.db.prepare('UPDATE tournaments SET config = ?, start_at = ?, version = version + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(cfg), startAt, nowIso(ctx), t.id);
+export function pollWarnings(ctx: AppContext, t: LoadedTournament): string[] {
+  const warnings: string[] = [];
+  if (t.state === 'draft') warnings.push('The vote starts when you publish the tournament.');
+  if (!tournamentChannel(ctx, t, 'registration')) warnings.push('No registration or announcement channel is set, so the vote is only on the website.');
+  return warnings;
+}
+
+type VoteSettings = TournamentConfig['schedule']['startVote'];
+
+/** The vote's times, checked for going live now. Throws a clear error when they cannot. */
+function liveTimes(ctx: AppContext, v: VoteSettings): { options: string[]; closesAt: string } {
+  const now = ctx.clock.now().getTime();
+  const times = v.options.map((o) => Date.parse(o));
+  if (times.length < 2 || times.length > MAX_START_VOTE_OPTIONS) throw invalid('bad_options', `Give between 2 and ${MAX_START_VOTE_OPTIONS} start times to vote on.`);
+  if (new Set(times).size !== times.length) throw invalid('duplicate_option', 'The same start time is listed twice.');
+  const closes = v.closesAt ? Date.parse(v.closesAt) : NaN;
+  if (Number.isNaN(closes)) throw invalid('bad_deadline', 'Set when voting on the start time closes.');
+  if (closes <= now) throw invalid('bad_deadline', "The start time vote's deadline has passed. Move it to the future in the settings.");
+  if (times.some((ms) => ms <= closes)) throw invalid('bad_deadline', 'Every start time must be after the voting deadline.');
+  return { options: times.sort((a, b) => a - b).map((ms) => new Date(ms).toISOString()), closesAt: new Date(closes).toISOString() };
+}
+
+/** Put the configured vote live. Runs inside the caller's transaction. */
+function insertPoll(ctx: AppContext, t: LoadedTournament, actorId: string | null, source: Source) {
+  const { options, closesAt } = liveTimes(ctx, t.cfg.schedule.startVote);
+  const iso = nowIso(ctx);
+  ctx.db
+    .prepare("INSERT INTO start_polls (tournament_id, options, closes_at, status, created_by, created_at, updated_at) VALUES (?, ?, ?, 'open', ?, ?, ?)")
+    .run(t.id, JSON.stringify(options), closesAt, actorId, iso, iso);
+  bump(ctx, t.id);
+  audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'start_poll.created', details: { options, closesAt, source } });
+}
+
+/**
+ * Called before a tournament is published (or created published): checks the configured vote can go
+ * live and returns the step that starts it, to run in the same transaction as the publish.
+ */
+export function voteOnPublish(ctx: AppContext, cfg: TournamentConfig): ((t: LoadedTournament, actorId: string | null, source: Source) => void) | null {
+  if (!cfg.schedule.startVote.enabled) return null;
+  liveTimes(ctx, cfg.schedule.startVote);
+  return (fresh, actorId, source) => {
+    if (!openPoll(ctx, fresh.id)) insertPoll(ctx, fresh, actorId, source);
+  };
+}
+
+/**
+ * Settings changed: work out what that means for the vote, throwing if the change is not allowed.
+ * Returns the step to run in the save's transaction (with the tournament as saved), or null.
+ *  - Running vote: times can be added and the deadline moved; removing a time or turning the vote
+ *    off needs Cancel vote first (votes are stored by the time's position).
+ *  - Published, no vote running, switched on: the vote goes live now.
+ *  - Draft: it goes live on publish.
+ */
+export function voteOnSettingsChange(ctx: AppContext, t: LoadedTournament, next: TournamentConfig): ((t: LoadedTournament, actorId: string, source: Source) => void) | null {
+  const v = next.schedule.startVote;
+  const p = openPoll(ctx, t.id);
+  if (p) {
+    if (!v.enabled) throw conflict('start_poll_open', 'A start time vote is running. Close or cancel it on the Control tab before turning off "Vote on date first".');
+    const current = optionsOf(p);
+    const have = new Set(current.map((o) => Date.parse(o)));
+    const want = new Set(v.options.map((o) => Date.parse(o)));
+    if ([...have].some((ms) => !want.has(ms))) throw conflict('start_poll_open', 'While the vote is running you can add times and move the deadline. To remove or change a time, cancel the vote first.');
+    const added = [...want].filter((ms) => !have.has(ms));
+    const deadlineMoved = v.closesAt !== null && Date.parse(v.closesAt) !== Date.parse(p.closes_at);
+    if (!added.length && !deadlineMoved) return null;
+    const { closesAt } = liveTimes(ctx, v);
+    const options = [...current, ...added.sort((a, b) => a - b).map((ms) => new Date(ms).toISOString())];
+    return (fresh, actorId, source) => {
+      ctx.db.prepare("UPDATE start_polls SET options = ?, closes_at = ?, updated_at = ? WHERE id = ? AND status = 'open'").run(JSON.stringify(options), closesAt, nowIso(ctx), p.id);
+      bump(ctx, fresh.id);
+      audit(ctx, { guildId: fresh.guild_id, tournamentId: fresh.id, actorId, action: 'start_poll.updated', details: { added: options.slice(current.length), closesAt, source } });
+    };
+  }
+  if (!v.enabled || t.state === 'draft') return null;
+  if (t.state !== 'published') throw conflict('bad_state', 'The start time vote is for before registration opens: it opens registration when it closes.');
+  liveTimes(ctx, v);
+  return (fresh, actorId, source) => insertPoll(ctx, fresh, actorId, source);
+}
+
+/** The vote is over: switch "Vote on date first" off and, with a winner, make it the start time. */
+function endVoteSetting(ctx: AppContext, t: LoadedTournament, startAt: string | null) {
+  const cfg = { ...t.cfg, schedule: { ...t.cfg.schedule, startAt: startAt ?? t.cfg.schedule.startAt, startVote: { ...t.cfg.schedule.startVote, enabled: false } } };
+  ctx.db.prepare('UPDATE tournaments SET config = ?, start_at = ?, version = version + 1, updated_at = ? WHERE id = ?').run(JSON.stringify(cfg), cfg.schedule.startAt, nowIso(ctx), t.id);
   scheduleTournamentReminders(ctx, loadTournament(ctx, t.id));
 }
 
@@ -155,7 +222,7 @@ export async function cancelPoll(ctx: AppContext, actorId: string, tournamentId:
   tx(ctx, () => {
     const now = nowIso(ctx);
     ctx.db.prepare("UPDATE start_polls SET status = 'cancelled', closed_at = ?, closed_by = ?, updated_at = ? WHERE id = ? AND status = 'open'").run(now, actorId, now, p.id);
-    bump(ctx, t.id);
+    endVoteSetting(ctx, t, null);
     audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'start_poll.cancelled', details: { source } });
   });
   ctx.kick(t.id);
@@ -235,7 +302,7 @@ async function closePoll(ctx: AppContext, p: PollRow, actorId: string | null, so
     if (!r.changes) return false;
     bump(ctx, t.id);
     audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'start_poll.closed', details: { winner: stillMatters && winner != null ? options[winner] : null, counts: c, tie: tied.length > 1, source } });
-    if (stillMatters && winner != null) setStartAt(ctx, t, options[winner]);
+    if (stillMatters) endVoteSetting(ctx, t, winner != null ? options[winner] : null);
     return true;
   });
   if (!claimed || !stillMatters) {
@@ -343,24 +410,32 @@ function shortTime(iso: string, tz: string) {
   }
 }
 
+/** Option indexes in time order (times added to a running vote are stored at the end). */
+function byTime(options: string[]): number[] {
+  return options.map((_, i) => i).sort((a, b) => Date.parse(options[a]) - Date.parse(options[b]));
+}
+
 function renderCard(ctx: AppContext, t: LoadedTournament, p: PollRow): MessageContent {
   const options = optionsOf(p);
   const c = counts(ctx, p);
+  const order = byTime(options);
   const head = `🗳️ **When should ${escapeDiscord(t.name)} start?**`;
-  const lines = options.map((at, i) => {
+  // Angle brackets stop Discord from adding a big link preview under the card.
+  const link = `Details and sign-up: <${ctx.env.WEB_URL}/#/t/${t.id}>`;
+  const lines = order.map((i, n) => {
     const won = p.status === 'closed' && p.winner === i;
-    return `${won ? '🏆' : NUMBERS[i]} ${discordTime(at, 'F')} · **${c[i]}** vote${c[i] === 1 ? '' : 's'}`;
+    return `${won ? '🏆' : numberMark(n + 1)} ${discordTime(options[i], 'F')} · **${c[i]}** vote${c[i] === 1 ? '' : 's'}`;
   });
   if (p.status === 'open') {
     return {
-      content: `${head}\nTap every time that works for you (tap again to undo). Voting closes ${discordTime(p.closes_at, 'R')}. Everyone who picks the winning time is registered automatically.\n${lines.join('\n')}`,
-      buttons: options.map((at, i) => ({ customId: pollCustomId(p.id, i), label: `${i + 1} · ${shortTime(at, t.cfg.schedule.timezone)}`.slice(0, 80), style: 'primary' as const })),
+      content: `${head}\nTap every time that works for you (tap again to undo). Voting closes ${discordTime(p.closes_at, 'R')}. Everyone who picks the winning time is registered automatically.\n${lines.join('\n')}\n${link}`,
+      buttons: order.map((i, n) => ({ customId: pollCustomId(p.id, i), label: `${n + 1} · ${shortTime(options[i], t.cfg.schedule.timezone)}`.slice(0, 80), style: 'primary' as const })),
     };
   }
-  if (p.status === 'cancelled') return { content: `${head}\nThis vote was cancelled.`, buttons: [] };
-  if (p.winner == null) return { content: `${head}\nVoting closed with no votes. The organizers will set the start time.\n${lines.join('\n')}`, buttons: [] };
+  if (p.status === 'cancelled') return { content: `${head}\nThis vote was cancelled.\n${link}`, buttons: [] };
+  if (p.winner == null) return { content: `${head}\nVoting closed with no votes. The organizers will set the start time.\n${lines.join('\n')}\n${link}`, buttons: [] };
   return {
-    content: `${head}\nVoting closed: **${discordTime(options[p.winner], 'F')}** won${p.tie ? ' (a tie, picked at random)' : ''}. Everyone who voted for it is registered, and registration is open for everyone else.\n${lines.join('\n')}`,
+    content: `${head}\nVoting closed: **${discordTime(options[p.winner], 'F')}** won${p.tie ? ' (a tie, picked at random)' : ''}. Everyone who voted for it is registered, and registration is open for everyone else.\n${lines.join('\n')}\n${link}`,
     buttons: [],
   };
 }

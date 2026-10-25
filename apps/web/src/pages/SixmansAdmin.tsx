@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
+import { FINALS_TEAM_FORMATION_LABELS, FINALS_TEAM_FORMATIONS } from '@rl/core';
 import { ErrorBox, Field, useToast } from '../components/ui';
 import { SixmansStandings } from '../components/standings';
 import { RoundsPreview } from '../components/sixmansRounds';
@@ -190,8 +191,17 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
   const { busy, error, run } = useAsync();
   const [perPool, setPerPool] = useState<number>(plan.qualifiersPerPool);
   const n = (u: string) => names.get(u) ?? u;
-  const preview = async (optionId: string | null, q?: number) => {
-    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/preview`, { body: { optionId, qualifiersPerPool: q ?? perPool } }))) reload();
+  const preview = async (optionId: string | null, q?: number, extra: Record<string, unknown> = {}) => {
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/preview`, { body: { optionId, qualifiersPerPool: q ?? perPool, ...extra } }))) reload();
+  };
+  // Older proposals (made before these choices existed) fall back to the settings.
+  const sm = t.config.sixmans;
+  const bracketFormat: string = plan.bracketFormat ?? 'single_elim';
+  const formation: string = plan.formation ?? sm.finalsTeamFormation;
+  const keepOption = plan.optionId === 'hand_picked' ? null : plan.optionId;
+  // Bracket changes keep the teams as they are (including swaps and hand-picked teams).
+  const reshape = async (body: Record<string, unknown>) => {
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/preview`, { body }))) reload();
   };
   const moveTo = async (userId: string, to: number) => {
     const teams = plan.teams.map((tm: any) => ({ players: tm.players.filter((u: string) => u !== userId) }));
@@ -219,7 +229,24 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
       </div>
       <ErrorBox error={error} />
       <p className="small muted">Qualified ({plan.qualified.length}): {plan.qualified.map((q: any) => `${n(q.playerId)} (P${q.poolIndex + 1} #${q.poolRank})`).join(', ')}</p>
-      <h4>Structure</h4>
+      <h4>Bracket</h4>
+      <div className="row" style={{ gap: 16 }}>
+        <label className="row small">Format
+          <select value={bracketFormat} disabled={busy} onChange={(e) => void reshape({ bracketFormat: e.target.value })}>
+            <option value="single_elim">Single elimination</option><option value="double_elim">Double elimination</option>
+          </select>
+        </label>
+        {bracketFormat === 'single_elim' && <label className="check small"><input type="checkbox" checked={!!plan.thirdPlace} disabled={busy} onChange={(e) => void reshape({ thirdPlace: e.target.checked })} /> Third-place match</label>}
+        {bracketFormat === 'double_elim' && <label className="check small"><input type="checkbox" checked={!!plan.grandFinalReset} disabled={busy} onChange={(e) => void reshape({ grandFinalReset: e.target.checked })} /> Grand-final reset</label>}
+        <label className="row small">Teams
+          <select value={plan.optionId === 'hand_picked' ? 'hand_picked' : formation} disabled={busy} onChange={(e) => (e.target.value === 'hand_picked' ? setHandPick(true) : void preview(keepOption, undefined, { formation: e.target.value }))}>
+            {FINALS_TEAM_FORMATIONS.map((f) => <option key={f} value={f}>{FINALS_TEAM_FORMATION_LABELS[f]}</option>)}
+            <option value="hand_picked">Hand-picked</option>
+          </select>
+        </label>
+      </div>
+      {plan.mixedPoolTeams > 0 && plan.optionId !== 'hand_picked' && <div className="alert info small" style={{ marginTop: 8 }}>Some pools do not have a multiple of 3 finals players, so {plan.mixedPoolTeams} team{plan.mixedPoolTeams === 1 ? ' mixes' : 's mix'} players from different pools.</div>}
+      <h4 style={{ marginTop: 14 }}>Structure</h4>
       <div className="stack">
         {plan.optionId === 'hand_picked' && <div className="alert info">Using your hand-picked teams. Choose a structure below to go back to automatic teams.</div>}
         {plan.options.filter((o: any) => o.id !== 'hand_picked').map((o: any) => (
@@ -229,7 +256,7 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
           </label>
         ))}
       </div>
-      <h4 style={{ marginTop: 14 }}>Teams ({plan.optionId === 'hand_picked' ? 'hand-picked' : 'balanced'}; click two players to swap them)</h4>
+      <h4 style={{ marginTop: 14 }}>Teams ({plan.optionId === 'hand_picked' ? 'hand-picked' : FINALS_TEAM_FORMATION_LABELS[formation as 'balanced']?.toLowerCase() ?? formation}; click two players to swap them)</h4>
       <div className="pool-grid">
         {plan.teams.map((tm: any, i: number) => (
           <div className="round" key={tm.key}>
@@ -246,7 +273,7 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
           </div>
         ))}
       </div>
-      <h4 style={{ marginTop: 14 }}>First round</h4>
+      <h4 style={{ marginTop: 14 }}>First round{bracketFormat === 'double_elim' ? ' (winners bracket)' : ''}</h4>
       <div className="small">{plan.bracket.filter((b: any) => b.round === 1).map((b: any, i: number) => {
         const tn = (k: string | null) => (k ? plan.teams.find((x: any) => x.key === k)?.name ?? k : 'bye');
         return <div key={i}>{tn(b.a)} vs {tn(b.b)}</div>;

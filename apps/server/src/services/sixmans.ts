@@ -1,7 +1,7 @@
 import {
   buildFinalsBracket, computeSixmansStandings, computeSkills, conflict, crossPoolOrder, defaultQualifiersPerPool, finalsOptions, formFinalsTeams, invalid,
   handPickedOption, isPreStart, makePools, planEqualRounds, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
-  type FinalsOption, type FinalsTeam, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
+  type FinalsOption, type FinalsTeam, type FinalsTeamFormation, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
 } from '@rl/core';
 import type { AppContext, Source } from './context.js';
 import { nowIso, tx } from './context.js';
@@ -52,6 +52,22 @@ export interface FinalsPlanData {
   optionId: string;
   teams: FinalsTeam[];
   bracket: { round: number; position: number; a: string | null; b: string | null }[];
+  /** How the bracket is built and the teams formed. Defaults come from the settings; Finals setup can change them. Older plans lack these. */
+  bracketFormat?: 'single_elim' | 'double_elim';
+  thirdPlace?: boolean;
+  grandFinalReset?: boolean;
+  formation?: FinalsTeamFormation;
+  /** Pool based formation could not keep every team inside one pool. */
+  mixedPoolTeams?: number;
+}
+
+export interface FinalsChoices {
+  optionId?: string | null;
+  qualifiersPerPool?: number | null;
+  bracketFormat?: 'single_elim' | 'double_elim';
+  thirdPlace?: boolean;
+  grandFinalReset?: boolean;
+  formation?: FinalsTeamFormation;
 }
 
 export function currentPlan(ctx: AppContext, tournamentId: number, kind: PlanRow['kind']): PlanRow | undefined {
@@ -358,24 +374,34 @@ export function qualifiersPerPool(t: LoadedTournament): number {
   return t.cfg.sixmans.qualifiersPerPool ?? defaultQualifiersPerPool(t.cfg.sixmans.poolCount);
 }
 
-function buildFinalsPlan(ctx: AppContext, t: LoadedTournament, optionId: string | null, perPoolOverride: number | null): FinalsPlanData {
+function buildFinalsPlan(ctx: AppContext, t: LoadedTournament, choices: FinalsChoices): FinalsPlanData {
   const ps = poolStandings(ctx, t);
-  const perPool = perPoolOverride ?? qualifiersPerPool(t);
+  const perPool = choices.qualifiersPerPool ?? qualifiersPerPool(t);
+  const optionId = choices.optionId ?? null;
+  const sm = t.cfg.sixmans;
+  const formation = choices.formation ?? sm.finalsTeamFormation;
+  const shape = { bracketFormat: choices.bracketFormat ?? sm.finalsBracket, thirdPlace: choices.thirdPlace ?? sm.finalsThirdPlace, grandFinalReset: choices.grandFinalReset ?? sm.finalsGrandFinalReset };
   const { qualified, others } = qualify(ps.map((p) => p.standings), perPool);
   const options = finalsOptions(qualified, others);
   const preferred = optionId ?? (options.find((o) => o.id === 'as_qualified') ? 'as_qualified' : t.cfg.sixmans.qualifierAdjustment);
   const option = options.find((o) => o.id === preferred) ?? options[0];
   const order = new Map([...qualified, ...others].sort(crossPoolOrder).map((q, i) => [q.playerId, i]));
   const skill = new Map([...qualified, ...others].map((q) => [q.playerId, q.skill]));
-  const teams = formFinalsTeams(option.players.map((u) => ({ id: u, skill: skill.get(u) ?? 0, order: order.get(u) ?? 999 })), t.cfg.sixmans.finalsTeamFormation, t.cfg.seeding.seed);
+  const pool = new Map([...qualified, ...others].map((q) => [q.playerId, q.poolIndex]));
+  const teams = formFinalsTeams(option.players.map((u) => ({ id: u, skill: skill.get(u) ?? 0, order: order.get(u) ?? 999, pool: pool.get(u) })), formation, t.cfg.seeding.seed);
   const names = userNames(ctx, option.players);
   for (const tm of teams) tm.name = `Team ${names.get(tm.players[0]) ?? tm.seed}`;
-  return { qualifiersPerPool: perPool, qualified, others, options, optionId: option.id, teams, bracket: bracketPreview(teams) };
+  const mixedPoolTeams = formation.startsWith('pool_') ? teams.filter((tm) => new Set(tm.players.map((u) => pool.get(u))).size > 1).length : 0;
+  const data: FinalsPlanData = { qualifiersPerPool: perPool, qualified, others, options, optionId: option.id, teams, bracket: [], ...shape, formation, mixedPoolTeams };
+  data.bracket = bracketPreview(data);
+  return data;
 }
 
-function bracketPreview(teams: FinalsTeam[]) {
-  return buildFinalsBracket(teams.map((x) => x.key))
-    .filter((m) => m.round === 1)
+const bracketOptions = (data: FinalsPlanData) => ({ format: data.bracketFormat ?? 'single_elim', thirdPlace: data.thirdPlace, grandFinalReset: data.grandFinalReset });
+
+function bracketPreview(data: FinalsPlanData) {
+  return buildFinalsBracket(data.teams.map((x) => x.key), bracketOptions(data))
+    .filter((m) => m.round === 1 && (m.bracket === 'finals' || m.bracket === 'winners'))
     .map((m) => ({ round: m.round, position: m.position, a: m.sourceA.type === 'entrant' ? m.sourceA.entrantId : null, b: m.sourceB.type === 'entrant' ? m.sourceB.entrantId : null }));
 }
 
@@ -383,8 +409,8 @@ const groupFingerprint = (ctx: AppContext, t: LoadedTournament) =>
   sha256(JSON.stringify(matchesOf(ctx, t.id, 'group').map((m) => [m.id, m.status, m.winner, m.result_version])));
 
 /** Create or refresh the finals proposal. actorId null = automatic at group completion. */
-export function proposeFinals(ctx: AppContext, t: LoadedTournament, actorId: string | null, optionId: string | null = null, perPool: number | null = null) {
-  const data = buildFinalsPlan(ctx, t, optionId, perPool);
+export function proposeFinals(ctx: AppContext, t: LoadedTournament, actorId: string | null, choices: FinalsChoices = {}) {
+  const data = buildFinalsPlan(ctx, t, choices);
   savePlan(ctx, t, 'finals', 'proposed', data, groupFingerprint(ctx, t), actorId);
   return data;
 }
@@ -397,11 +423,35 @@ async function finalsManager(ctx: AppContext, actorId: string, id: number) {
   return t;
 }
 
-export async function previewFinals(ctx: AppContext, actorId: string, id: number, input: { optionId?: string | null; qualifiersPerPool?: number | null }, source: Source) {
+export async function previewFinals(ctx: AppContext, actorId: string, id: number, input: FinalsChoices, source: Source) {
   const t = await finalsManager(ctx, actorId, id);
   return tx(ctx, () => {
-    const data = proposeFinals(ctx, t, actorId, input.optionId ?? null, input.qualifiersPerPool ?? null);
-    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_previewed', details: { optionId: data.optionId, qualifiersPerPool: data.qualifiersPerPool, source } });
+    // Choices not given keep what the current proposal uses, so changing one picker keeps the others.
+    const prev = currentPlan(ctx, t.id, 'finals');
+    const old = prev ? (JSON.parse(prev.data) as FinalsPlanData) : null;
+    // Only the bracket changes: keep the teams as they are (swaps and hand-picked teams included).
+    if (prev && old && input.optionId === undefined && input.qualifiersPerPool === undefined && input.formation === undefined) {
+      const data: FinalsPlanData = {
+        ...old,
+        bracketFormat: input.bracketFormat ?? old.bracketFormat ?? t.cfg.sixmans.finalsBracket,
+        thirdPlace: input.thirdPlace ?? old.thirdPlace ?? t.cfg.sixmans.finalsThirdPlace,
+        grandFinalReset: input.grandFinalReset ?? old.grandFinalReset ?? t.cfg.sixmans.finalsGrandFinalReset,
+      };
+      data.bracket = bracketPreview(data);
+      savePlan(ctx, t, 'finals', 'proposed', data, prev.fingerprint, actorId);
+      audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_previewed', details: { bracketFormat: data.bracketFormat, thirdPlace: data.thirdPlace, grandFinalReset: data.grandFinalReset, source } });
+      return data;
+    }
+    const keep = <K extends keyof FinalsChoices>(k: K, v: FinalsChoices[K] | undefined) => (input[k] !== undefined ? input[k] : v);
+    const data = proposeFinals(ctx, t, actorId, {
+      optionId: input.optionId ?? null,
+      qualifiersPerPool: input.qualifiersPerPool ?? null,
+      bracketFormat: keep('bracketFormat', old?.bracketFormat),
+      thirdPlace: keep('thirdPlace', old?.thirdPlace),
+      grandFinalReset: keep('grandFinalReset', old?.grandFinalReset),
+      formation: keep('formation', old?.formation),
+    });
+    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_previewed', details: { optionId: data.optionId, qualifiersPerPool: data.qualifiersPerPool, bracketFormat: data.bracketFormat, formation: data.formation, source } });
     return data;
   });
 }
@@ -430,7 +480,7 @@ export async function editFinalsTeams(ctx: AppContext, actorId: string, id: numb
   const skill = new Map([...data.qualified, ...data.others].map((q) => [q.playerId, q.skill]));
   const names = userNames(ctx, option.players);
   data.teams = teams.map((tm, i) => ({ key: `team${i + 1}`, name: `Team ${names.get(tm.players[0]) ?? i + 1}`, players: tm.players, skill: tm.players.reduce((s, u) => s + (skill.get(u) ?? 0), 0), seed: i + 1 }));
-  data.bracket = bracketPreview(data.teams);
+  data.bracket = bracketPreview(data);
   tx(ctx, () => {
     savePlan(ctx, t, 'finals', 'proposed', data, plan.fingerprint, actorId);
     audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.finals_teams_edited', details: { teams: teams.map((x) => x.players), handPicked: !!opts.handPicked, source } });
@@ -466,9 +516,9 @@ export async function startFinals(ctx: AppContext, actorId: string, id: number, 
       keyToCompetitor.set(tm.key, cid);
       for (const u of tm.players) ctx.db.prepare("INSERT INTO competitor_members (competitor_id, user_id, role) VALUES (?, ?, 'player')").run(cid, u);
     }
-    const bracket = buildFinalsBracket(data.teams.map((x) => String(keyToCompetitor.get(x.key))));
+    const bracket = buildFinalsBracket(data.teams.map((x) => String(keyToCompetitor.get(x.key))), bracketOptions(data));
     for (const bm of bracket)
-      insertMatch(ctx, t, { stage: 'finals', bracket: 'finals', round: bm.round, position: bm.position, key: bm.key, sourceA: bm.sourceA, sourceB: bm.sourceB, status: 'pending' });
+      insertMatch(ctx, t, { stage: 'finals', bracket: bm.bracket, round: bm.round, position: bm.position, key: bm.key, sourceA: bm.sourceA, sourceB: bm.sourceB, status: 'pending' });
     ctx.db.prepare("UPDATE tournaments SET stage = 'finals', version = version + 1, updated_at = ? WHERE id = ?").run(now, t.id);
     savePlan(ctx, t, 'finals', 'confirmed', data, plan.fingerprint, actorId);
     const fresh = loadTournament(ctx, t.id);
