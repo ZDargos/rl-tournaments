@@ -1,9 +1,9 @@
-import { FORMAT_LABELS, FORMATS, NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type TournamentConfig } from '@rl/core';
+import { FINALS_TEAM_FORMATION_LABELS, FINALS_TEAM_FORMATIONS, FORMAT_LABELS, FORMATS, MAX_START_VOTE_OPTIONS, NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type TournamentConfig } from '@rl/core';
 import { Check, Field, Help } from './ui';
 import { CATEGORY_HELP, HELP } from './settingHelp';
 import { isoToLocalInput, localInputToIso, TIMEZONES } from '../lib/format';
 import { RoundsPreview } from './sixmansRounds';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type Cfg = TournamentConfig;
 type Set = (fn: (c: Cfg) => void) => void;
@@ -14,11 +14,14 @@ const listText = (xs: number[]) => xs.join(', ');
 const reminderHours = (cfg: Cfg) => cfg.notifications.startReminderHours ?? ((cfg.notifications as { startReminders?: number[] }).startReminders ?? []).map((m) => Math.round((m / 60) * 10000) / 10000);
 const parseList = (s: string) => s.split(/[,\s]+/).filter(Boolean).map(Number).filter((n) => Number.isFinite(n) && n >= 0);
 
+/** Where "Vote on date first" applies: allowed before registration opens; `running` = times of a vote already live. null hides it (presets). */
+export type StartVoteContext = { allowed: boolean; running?: string[] } | null;
+
 /**
  * Settings editor shared by the create wizard, the manage page and the preset editor.
  * `locked` disables structural settings once a tournament has started (the server enforces it too).
  */
-export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', channels = [], playerCount }: { cfg: Cfg; onChange: (c: Cfg) => void; locked?: boolean; sections?: 'all' | 'basic'; channels?: { id: string; name: string; type: string }[]; playerCount?: number }) {
+export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', channels = [], playerCount, startVote = { allowed: true } }: { cfg: Cfg; onChange: (c: Cfg) => void; locked?: boolean; sections?: 'all' | 'basic'; channels?: { id: string; name: string; type: string }[]; playerCount?: number; startVote?: StartVoteContext }) {
   const [previewPlayers, setPreviewPlayers] = useState<number | null>(null);
   const set: Set = (fn) => {
     const c = structuredClone(cfg);
@@ -32,6 +35,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
   };
   const tz = cfg.schedule.timezone;
   const six = cfg.format === 'sixmans';
+  const voting = !!startVote && cfg.schedule.startVote.enabled;
   const textChannels = channels.filter((c) => c.type === 'text');
   const categories = channels.filter((c) => c.type === 'category');
   const voiceChannels = channels.filter((c) => c.type === 'voice');
@@ -163,7 +167,12 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             </Field>
             <Field help={HELP.finalsTeamFormation} label="Finals teams">
               <select value={cfg.sixmans.finalsTeamFormation} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.finalsTeamFormation = e.target.value as 'balanced'))}>
-                <option value="balanced">Skill-balanced</option><option value="standings_snake">Snake by group finish</option>
+                {FINALS_TEAM_FORMATIONS.map((f) => <option key={f} value={f}>{FINALS_TEAM_FORMATION_LABELS[f]}</option>)}
+              </select>
+            </Field>
+            <Field help={HELP.finalsBracket} label="Finals bracket">
+              <select value={cfg.sixmans.finalsBracket} disabled={locked} onChange={(e) => set((c) => void (c.sixmans.finalsBracket = e.target.value as 'single_elim'))}>
+                <option value="single_elim">Single elimination</option><option value="double_elim">Double elimination</option>
               </select>
             </Field>
             <Field help={HELP.abandoned} label="Abandoned group matches">
@@ -180,6 +189,8 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
           </div>
           <div style={{ marginTop: 10 }}>
             <Check help={HELP.skillBalancedTeams} label="Skill-balanced group teams" checked={cfg.sixmans.skillBalancedTeams} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.skillBalancedTeams = v))} />
+            {cfg.sixmans.finalsBracket === 'single_elim' && <Check help={HELP.finalsThirdPlace} label="Finals third-place match" checked={cfg.sixmans.finalsThirdPlace} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.finalsThirdPlace = v))} />}
+            {cfg.sixmans.finalsBracket === 'double_elim' && <Check help={HELP.finalsGrandFinalReset} label="Finals grand-final reset" checked={cfg.sixmans.finalsGrandFinalReset} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.finalsGrandFinalReset = v))} />}
           </div>
           <p className="muted small" style={{ marginTop: 8 }}>Hard rule: the same three players are never teammates twice in a pool. Tie-breakers: points, goal difference, goals for, seed.</p>
         </section>
@@ -193,11 +204,20 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               {TIMEZONES.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>
           </Field>
-          <Field help={HELP.startAt} label={`Start (${tz})`}>
-            <input type="datetime-local" value={isoToLocalInput(cfg.schedule.startAt, tz)} disabled={locked} onChange={(e) => set((c) => void (c.schedule.startAt = localInputToIso(e.target.value, tz)))} />
-          </Field>
-          <Field help={HELP.opensAt} label={`Registration opens (${tz})`} hint="Empty = when you open it">
-            <input type="datetime-local" value={isoToLocalInput(cfg.registration.opensAt, tz)} disabled={locked} onChange={(e) => set((c) => void (c.registration.opensAt = localInputToIso(e.target.value, tz)))} />
+          {!voting && (
+            <Field help={HELP.startAt} label={`Start (${tz})`}>
+              <input type="datetime-local" value={isoToLocalInput(cfg.schedule.startAt, tz)} disabled={locked} onChange={(e) => set((c) => void (c.schedule.startAt = localInputToIso(e.target.value, tz)))} />
+            </Field>
+          )}
+          {startVote && (
+            <div className="field" style={{ justifyContent: 'flex-end' }}>
+              <Check help={HELP.startVote} label="Vote on date first" checked={voting} disabled={locked || (!voting && !startVote.allowed) || (voting && !!startVote.running?.length)} onChange={(v) => set((c) => void (c.schedule.startVote.enabled = v))} />
+              {!voting && !startVote.allowed && !locked && <span className="tiny muted">Only before registration opens.</span>}
+              {voting && !!startVote.running?.length && <span className="tiny muted">The vote is running. Close or cancel it on the Control tab to turn this off.</span>}
+            </div>
+          )}
+          <Field help={HELP.opensAt} label={`Registration opens (${tz})`} hint={voting ? 'Opens when the vote ends' : 'Empty = when you open it'}>
+            <input type="datetime-local" value={voting ? '' : isoToLocalInput(cfg.registration.opensAt, tz)} disabled={locked || voting} onChange={(e) => set((c) => void (c.registration.opensAt = localInputToIso(e.target.value, tz)))} />
           </Field>
           <Field help={HELP.closesAt} label={`Registration closes (${tz})`} hint="Empty = when you close it">
             <input type="datetime-local" value={isoToLocalInput(cfg.registration.closesAt, tz)} disabled={locked} onChange={(e) => set((c) => void (c.registration.closesAt = localInputToIso(e.target.value, tz)))} />
@@ -225,6 +245,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             </select>
           </Field>
         </div>
+        {voting && <VoteTimes cfg={cfg} set={set} tz={tz} locked={locked} running={startVote?.running ?? []} />}
         <div className="row" style={{ marginTop: 10, gap: 20 }}>
           <Check help={HELP.autoStart} label="Auto-start at the start time" checked={cfg.schedule.autoStart} disabled={locked} onChange={(v) => set((c) => void (c.schedule.autoStart = v))} />
           <Check help={HELP.requireApproval} label="Organizer approval required" checked={cfg.registration.requireApproval} disabled={locked} onChange={(v) => set((c) => void (c.registration.requireApproval = v))} />
@@ -363,6 +384,48 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
           </section>
         </>
       )}
+    </div>
+  );
+}
+
+/** "Vote on date first": the times players choose from and when voting closes. */
+function VoteTimes({ cfg, set, tz, locked, running }: { cfg: Cfg; set: Set; tz: string; locked: boolean; running: string[] }) {
+  const v = cfg.schedule.startVote;
+  const fromCfg = () => (v.options.length ? [...v.options].sort().map((o) => isoToLocalInput(o, tz)) : ['', '']);
+  // Rows keep half-typed (empty) times locally; the settings hold only complete ones.
+  const [rows, setRows] = useState<string[]>(fromCfg);
+  // A row left as it was keeps its exact stored time (inputs only show minutes).
+  const original = new Map(v.options.map((o) => [isoToLocalInput(o, tz), o]));
+  const saved = (xs: string[]) => xs.map((x) => original.get(x) ?? localInputToIso(x, tz)).filter((x): x is string => !!x);
+  useEffect(() => {
+    if (JSON.stringify(saved(rows).sort()) !== JSON.stringify([...v.options].sort())) setRows(fromCfg());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v.options.join(','), tz]);
+  const live = new Set(running.map((r) => isoToLocalInput(r, tz)));
+  const update = (next: string[]) => {
+    setRows(next);
+    set((c) => void (c.schedule.startVote.options = saved(next)));
+  };
+  return (
+    <div className="stack" style={{ marginTop: 10, gap: 8 }}>
+      <p className="muted small">Players vote on these times. {running.length ? 'The vote is live: you can add times and move the deadline. To remove a time, cancel the vote on the Control tab.' : 'The vote is posted in the registration channel when the tournament is published, and registration opens when voting ends.'}</p>
+      <div className="form-grid">
+        {rows.map((r, i) => {
+          const isLive = live.has(r);
+          return (
+            <Field key={i} label={`Time ${i + 1} (${tz})`}>
+              <div className="row" style={{ flexWrap: 'nowrap', gap: 6 }}>
+                <input type="datetime-local" value={r} disabled={locked || isLive} onChange={(e) => update(rows.map((x, j) => (j === i ? e.target.value : x)))} />
+                {rows.length > 2 && !isLive && <button type="button" className="btn small ghost" aria-label={`Remove time ${i + 1}`} disabled={locked} onClick={() => update(rows.filter((_, j) => j !== i))}>✕</button>}
+              </div>
+            </Field>
+          );
+        })}
+        <Field label={`Voting closes (${tz})`} hint="Before the earliest time">
+          <input type="datetime-local" value={isoToLocalInput(v.closesAt, tz)} disabled={locked} onChange={(e) => set((c) => void (c.schedule.startVote.closesAt = localInputToIso(e.target.value, tz)))} />
+        </Field>
+      </div>
+      {rows.length < MAX_START_VOTE_OPTIONS && <div><button type="button" className="btn small" disabled={locked} onClick={() => setRows([...rows, ''])}>+ Add a time</button></div>}
     </div>
   );
 }

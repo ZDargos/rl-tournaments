@@ -3,7 +3,7 @@ import {
   computeStandings, conflict, defaultSwissRounds, invalid, nextState, pairSwissRound, resolveBracket, seededShuffle,
   validateSchedule, type BracketMatch, type ResultRecord, type SlotSource, type StandingRow,
 } from '@rl/core';
-import { DomainError } from '@rl/core';
+import { DomainError, finalsFormatOf } from '@rl/core';
 import type { AppContext, Source } from './context.js';
 import { nowIso, tx } from './context.js';
 import { loadTournament, managerIds, type LoadedTournament } from './access.js';
@@ -438,8 +438,9 @@ export function advance(ctx: AppContext, tournamentId: number, stage: MatchRow['
     const ready = syncBracket(ctx, t, 'finals');
     notifyNewlyReady(ctx, t, ready);
     const core = matchesOf(ctx, t.id, 'finals').map(toCore);
-    const champ = bracketChampion(core, 'single_elim');
-    if (champ) completeTournament(ctx, t, bracketPlacements(core, 'single_elim'), Number(champ));
+    const format = finalsFormatOf(core);
+    const champ = bracketChampion(core, format);
+    if (champ) completeTournament(ctx, t, bracketPlacements(core, format), Number(champ));
   }
 }
 

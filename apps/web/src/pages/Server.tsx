@@ -123,7 +123,7 @@ export function PresetPage() {
         </div>
         <p className="muted tiny" style={{ marginTop: 6 }}>Version {p.version}. Tournaments created from this preset keep a snapshot; changes here only reach a tournament if an organizer re-applies it before it starts.</p>
       </div>
-      <div className="card"><ConfigForm cfg={p.config} onChange={(c) => setP({ ...p, config: c })} locked={!canEdit} channels={channels} /></div>
+      <div className="card"><ConfigForm cfg={p.config} onChange={(c) => setP({ ...p, config: c })} locked={!canEdit} channels={channels} startVote={null} /></div>
       <ErrorBox error={error} />
       {canEdit && (
         <div className="row" style={{ justifyContent: 'flex-end' }}>

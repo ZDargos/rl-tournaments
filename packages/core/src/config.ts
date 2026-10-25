@@ -47,6 +47,16 @@ export const NOTIFICATION_CATEGORY_LABELS: Record<NotificationCategory, string> 
   tournament_complete: 'Completion & placements',
 };
 
+export const FINALS_TEAM_FORMATIONS = ['balanced', 'standings_snake', 'pool_snake', 'pool_balanced'] as const;
+export type FinalsTeamFormation = (typeof FINALS_TEAM_FORMATIONS)[number];
+export const FINALS_TEAM_FORMATION_LABELS: Record<FinalsTeamFormation, string> = {
+  balanced: 'Skill-balanced',
+  standings_snake: 'Snake draft by group finish',
+  pool_snake: 'Pool based (snake by pool finish)',
+  pool_balanced: 'Pool based, skill-balanced',
+};
+export const MAX_START_VOTE_OPTIONS = 25;
+
 const delivery = z.object({ channel: z.boolean(), dm: z.boolean() });
 
 const STANDARD_TIEBREAKERS = ['points', 'head_to_head', 'buchholz', 'game_diff', 'goal_diff', 'goals_for', 'wins', 'seed'] as const;
@@ -95,6 +105,18 @@ export const configSchema = z.object({
   schedule: z
     .object({
       startAt: z.string().datetime().nullable().default(null),
+      /**
+       * "Vote on date first": instead of a fixed start time, players vote on these times. The vote goes
+       * live when the tournament is published and opens registration when it closes; the winning time
+       * then becomes startAt and this switches off.
+       */
+      startVote: z
+        .object({
+          enabled: z.boolean().default(false),
+          options: z.array(z.string().datetime()).max(25).default([]),
+          closesAt: z.string().datetime().nullable().default(null),
+        })
+        .prefault({}),
       timezone: z.string().min(1).max(64).default('UTC'),
       autoStart: z.boolean().default(false),
       /** Minutes after a match becomes ready before it is considered overdue (reminders, no-shows). */
@@ -195,7 +217,16 @@ export const configSchema = z.object({
       qualifiersPerPool: z.number().int().min(1).max(64).nullable().default(null),
       /** When qualifiers are not a multiple of 3. */
       qualifierAdjustment: z.enum(['expand', 'reduce']).default('expand'),
-      finalsTeamFormation: z.enum(['balanced', 'standings_snake']).default('balanced'),
+      /**
+       * balanced: skill-balanced across everyone. standings_snake: snake draft by group finish.
+       * pool_snake / pool_balanced: each team's players come from one pool (snake by pool finish, or
+       * skill-balanced inside the pool); players left over when a pool's count is not a multiple of 3
+       * are mixed across pools.
+       */
+      finalsTeamFormation: z.enum(FINALS_TEAM_FORMATIONS).default('balanced'),
+      finalsBracket: z.enum(['single_elim', 'double_elim']).default('single_elim'),
+      finalsThirdPlace: z.boolean().default(false),
+      finalsGrandFinalReset: z.boolean().default(false),
       /** Search budget for the scheduler. */
       schedulerTimeLimitMs: z.number().int().min(100).max(30000).default(4000),
     })
@@ -304,6 +335,8 @@ export function normalizeConfig(cfg: TournamentConfig): TournamentConfig {
     cfg.registrationMode = 'individual';
   }
   if (cfg.teamSize === 1) cfg.registrationMode = 'individual';
+  // While players vote on the start time there is no start time.
+  if (cfg.schedule.startVote.enabled) cfg.schedule.startAt = null;
   return cfg;
 }
 
@@ -317,7 +350,21 @@ export function validateConfig(cfg: TournamentConfig): string[] {
   if (r.minRoster != null && r.minRoster > cfg.teamSize) problems.push('Minimum roster cannot exceed team size.');
   if (cfg.checkIn.enabled && cfg.checkIn.closesMinutesBefore >= cfg.checkIn.opensMinutesBefore)
     problems.push('Check-in must open before it closes.');
-  if (cfg.schedule.autoStart && !cfg.schedule.startAt) problems.push('Auto-start needs a start time.');
+  const vote = cfg.schedule.startVote;
+  if (cfg.schedule.autoStart && !cfg.schedule.startAt && !vote.enabled) problems.push('Auto-start needs a start time.');
+  if (vote.enabled) {
+    const times = vote.options.map((o) => Date.parse(o));
+    if (times.length < 2) problems.push('Give at least two start times to vote on.');
+    if (times.length > MAX_START_VOTE_OPTIONS) problems.push(`A start time vote can have at most ${MAX_START_VOTE_OPTIONS} times.`);
+    if (new Set(times).size !== times.length) problems.push('The same start time is listed twice in the vote.');
+    if (!vote.closesAt) problems.push('Set when voting on the start time closes.');
+    else {
+      const closes = Date.parse(vote.closesAt);
+      if (times.some((ms) => ms <= closes)) problems.push('Every start time in the vote must be after voting closes.');
+      if (r.closesAt && Date.parse(r.closesAt) <= closes) problems.push('Registration must close after the start time vote closes (registration opens when the vote ends).');
+    }
+    if (r.closesAt && times.some((ms) => Date.parse(r.closesAt!) > ms)) problems.push('Registration must close before the earliest start time in the vote.');
+  }
   if (!isValidTimezone(cfg.schedule.timezone)) problems.push(`Unknown timezone "${cfg.schedule.timezone}".`);
   if (cfg.format === 'sixmans' && cfg.registration.capacity != null && cfg.registration.capacity < 6)
     problems.push('6mans needs a capacity of at least 6 players.');
@@ -353,6 +400,7 @@ export const LOCKED_AFTER_START = [
   'registration',
   'checkIn',
   'schedule.startAt',
+  'schedule.startVote',
   'schedule.autoStart',
   'schedule.matchDeadlineMinutes',
 ] as const;

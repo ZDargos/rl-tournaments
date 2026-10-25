@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { z, ZodError } from 'zod';
-import { DomainError, FORMATS, NOTIFICATION_CATEGORIES, RANKS, STATES, type TransitionAction } from '@rl/core';
+import { DomainError, FINALS_TEAM_FORMATIONS, FORMATS, MAX_START_VOTE_OPTIONS, NOTIFICATION_CATEGORIES, RANKS, STATES, type TransitionAction } from '@rl/core';
 import type { AppContext } from '../services/context.js';
 import { oauthConfigured } from '../env.js';
 import { authorizeUrl, handleCallback, OAUTH_SCOPES, type FetchLike } from '../auth/oauth.js';
@@ -357,7 +357,7 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     return { answer };
   });
   app.post('/api/tournaments/:id/start-poll', async (req) => {
-    const b = z.object({ options: z.array(z.string()).min(2).max(10), closesAt: z.string() }).parse(req.body);
+    const b = z.object({ options: z.array(z.string()).min(2).max(MAX_START_VOTE_OPTIONS), closesAt: z.string() }).parse(req.body);
     return createPoll(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b, src);
   });
   app.post('/api/tournaments/:id/start-poll/close', async (req) => closePollNow(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), src));
@@ -366,7 +366,7 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     return { ok: true };
   });
   app.post('/api/tournaments/:id/start-poll/vote', async (req) => {
-    const b = z.object({ options: z.array(z.number().int().min(0).max(9)).max(10) }).parse(req.body);
+    const b = z.object({ options: z.array(z.number().int().min(0).max(MAX_START_VOTE_OPTIONS - 1)).max(MAX_START_VOTE_OPTIONS) }).parse(req.body);
     const r = await setPollVotes(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.options, src);
     return { picks: r.picks };
   });
@@ -435,7 +435,11 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     swapScheduledPlayers(ctx, requireUser(req).id, tid(req), z.object({ poolIndex: z.number().int().min(0), round: z.number().int().min(1), playerA: snowflake, playerB: snowflake }).parse(req.body), src));
   app.post('/api/tournaments/:id/sixmans/schedule/confirm', async (req) => confirmSchedule(ctx, requireUser(req).id, tid(req), src));
   app.post('/api/tournaments/:id/sixmans/finals/preview', async (req) =>
-    previewFinals(ctx, requireUser(req).id, tid(req), z.object({ optionId: z.string().max(30).nullish(), qualifiersPerPool: z.number().int().min(1).max(64).nullish() }).parse(req.body ?? {}), src));
+    previewFinals(ctx, requireUser(req).id, tid(req), z.object({
+      optionId: z.string().max(30).nullish(), qualifiersPerPool: z.number().int().min(1).max(64).nullish(),
+      bracketFormat: z.enum(['single_elim', 'double_elim']).optional(), thirdPlace: z.boolean().optional(), grandFinalReset: z.boolean().optional(),
+      formation: z.enum(FINALS_TEAM_FORMATIONS).optional(),
+    }).parse(req.body ?? {}), src));
   app.put('/api/tournaments/:id/sixmans/finals/teams', async (req) => {
     const body = z.object({ teams: z.array(z.object({ players: z.array(snowflake) })).min(2).max(64), handPicked: z.boolean().optional() }).parse(req.body);
     return editFinalsTeams(ctx, requireUser(req).id, tid(req), body.teams, src, { handPicked: body.handPicked });

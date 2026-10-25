@@ -95,6 +95,8 @@ export function sideOf(ctx: AppContext, m: MatchRow, userId: string): 'a' | 'b' 
 }
 
 export function matchLabel(m: Pick<MatchRow, 'stage' | 'bracket' | 'round' | 'position' | 'id'>, poolName?: string | null): string {
+  // 6mans double elimination finals reuse the usual bracket names.
+  if (m.stage === 'finals' && m.bracket !== 'finals') return `Finals · ${matchLabel({ ...m, stage: 'main' })}`;
   const r = m.round;
   switch (m.bracket) {
     case 'winners': return `Winners R${r} · Match ${m.position + 1}`;
