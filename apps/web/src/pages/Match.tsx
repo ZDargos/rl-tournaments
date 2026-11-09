@@ -4,7 +4,8 @@ import { winsNeeded } from '@rl/core';
 import { api } from '../lib/api';
 import { useAsync, useLive } from '../lib/hooks';
 import { useAuth } from '../lib/auth';
-import { ConfirmButton, Empty, ErrorBox, Field, MatchBadge, Modal, Spinner, useToast } from '../components/ui';
+import { ArrowLeft, Headphones, Lock, Trophy } from 'lucide-react';
+import { Alert, ConfirmButton, Empty, ErrorBox, Field, MatchBadge, Modal, Spinner, useToast } from '../components/ui';
 import { fmtDate } from '../lib/format';
 
 type Game = { a: number | ''; b: number | '' };
@@ -50,7 +51,7 @@ export function MatchPage() {
   const [forfeit, setForfeit] = useState<'' | 'a' | 'b'>('');
   const { busy, error: actErr, setError, run } = useAsync();
   if (loading && !d) return <Spinner />;
-  if (error && !d) return error.status === 404 ? <Empty icon="🔒" title="Match not found" /> : <ErrorBox error={error} />;
+  if (error && !d) return error.status === 404 ? <Empty icon={Lock} title="Match not found">It may belong to a private tournament.</Empty> : <ErrorBox error={error} />;
   if (!d) return null;
   const m = d.match;
   const t = d.tournament;
@@ -86,42 +87,54 @@ export function MatchPage() {
   };
 
   return (
-    <div className="stack" style={{ maxWidth: 900, margin: '0 auto' }}>
+    <div className="stack" style={{ maxWidth: 920, margin: '0 auto' }}>
       <div className="row between">
-        <Link to={`/t/${t.id}`}>← {t.name}</Link>
+        <Link className="crumb" to={`/t/${t.id}`}><ArrowLeft aria-hidden />{t.name}</Link>
         <MatchBadge status={m.status} />
       </div>
-      <div className="card">
-        <div className="muted small">{m.label} · Match #{m.id} · Best of {m.bestOf}</div>
-        <div className="vs" style={{ marginTop: 14 }}>
-          <div>
-            <div className="team-a" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{nameA} {m.winner === 'a' && '🏆'}</div>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="row between small muted" style={{ padding: '12px 18px' }}>
+          <span>{m.label}</span>
+          <span>Match {m.id}, best of {m.bestOf}</span>
+        </div>
+        <div className="scorebug">
+          <div className="side a">
+            <div className="team-name">{nameA}{m.winner === 'a' && <Trophy aria-label="Winner" style={{ display: 'inline', width: 20, height: 20, marginLeft: 8, color: 'var(--yellow)' }} />}</div>
             <div className="small muted">{m.a?.players.map((p: any) => p.name).join(', ')}</div>
           </div>
-          <div style={{ fontSize: '2rem', fontWeight: 900, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-            {m.status === 'completed' ? (m.forfeit ? 'FF' : `${m.winsA}–${m.winsB}`) : m.liveGames.length ? <span className="muted" title="Unofficial live score">{m.liveGames.filter((g: any) => g.a > g.b).length}–{m.liveGames.filter((g: any) => g.b > g.a).length}</span> : 'vs'}
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="team-b" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{m.winner === 'b' && '🏆'} {nameB}</div>
+          {m.status === 'completed' ? (
+            <div className="score" aria-label="Series score">{m.forfeit ? 'FF' : <>{m.winsA}<span className="sep">–</span>{m.winsB}</>}</div>
+          ) : m.liveGames.length ? (
+            <div className="score" title="Unofficial live score" style={{ color: 'var(--muted)' }}>{m.liveGames.filter((g: any) => g.a > g.b).length}<span className="sep">–</span>{m.liveGames.filter((g: any) => g.b > g.a).length}</div>
+          ) : <div className="score vs">vs</div>}
+          <div className="side b">
+            <div className="team-name">{m.winner === 'b' && <Trophy aria-label="Winner" style={{ display: 'inline', width: 20, height: 20, marginRight: 8, color: 'var(--yellow)' }} />}{nameB}</div>
             <div className="small muted">{m.b?.players.map((p: any) => p.name).join(', ')}</div>
           </div>
         </div>
-        {m.games.length > 0 && (
-          <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
-            {m.games.map((g: any, i: number) => <span key={i} className="badge">G{i + 1}: {g.a}–{g.b}</span>)}
-          </div>
-        )}
-        {m.status === 'ready' && m.liveGames.length > 0 && <p className="muted small" style={{ textAlign: 'center', marginTop: 8 }}>Live score is unofficial until the result is reported and confirmed.</p>}
-        {d.voice.length > 0 && (
-          <div className="alert info" style={{ marginTop: 12 }}>
-            🎧 Voice: {d.voice.filter((v: any) => v.status === 'active').map((v: any) => <span key={v.id} style={{ marginRight: 10 }}>{v.slot === 'a' ? nameA : nameB}: <span className="mono">#{v.name}</span></span>)}
-            {d.voice.some((v: any) => v.status === 'failed') && <span className="muted"> (some channels could not be created; organizers were notified)</span>}
+        {(m.games.length > 0 || (m.status === 'ready' && m.liveGames.length > 0) || d.voice.length > 0) && (
+          <div className="stack tight" style={{ padding: '14px 18px' }}>
+            {m.games.length > 0 && (
+              <div className="row" style={{ justifyContent: 'center' }}>
+                {m.games.map((g: any, i: number) => <span key={i} className="badge">Game {i + 1}: {g.a}–{g.b}</span>)}
+              </div>
+            )}
+            {m.status === 'ready' && m.liveGames.length > 0 && <p className="muted small" style={{ textAlign: 'center', margin: 0 }}>The live score is unofficial until the result is reported and confirmed.</p>}
+            {d.voice.length > 0 && (
+              <Alert kind="info" icon={false}>
+                <span className="row" style={{ gap: 10 }}>
+                  <Headphones aria-hidden width={16} height={16} />
+                  {d.voice.filter((v: any) => v.status === 'active').map((v: any) => <span key={v.id}>{v.slot === 'a' ? nameA : nameB}: <strong>#{v.name}</strong></span>)}
+                  {d.voice.some((v: any) => v.status === 'failed') && <span className="muted">(some channels could not be created; organizers were notified)</span>}
+                </span>
+              </Alert>
+            )}
           </div>
         )}
       </div>
 
       {canConfirm && (
-        <div className="card" style={{ borderColor: 'var(--yellow)' }}>
+        <div className="card accent-yellow">
           <h3>Confirm the reported result</h3>
           <p>The other team reported <strong>{opposingReport.winsA}–{opposingReport.winsB}</strong>{opposingReport.games?.length ? ` (${opposingReport.games.map((g: any) => `${g.a}-${g.b}`).join(', ')})` : ''}.</p>
           <div className="row">
@@ -132,17 +145,17 @@ export function MatchPage() {
       )}
 
       {canReport && (
-        <div className="card">
+        <div className="card accent-orange">
           <h3>{myReport ? 'Update your report' : 'Report the result'}</h3>
           {myReport && <p className="muted small">You reported {myReport.winsA}–{myReport.winsB}. Waiting for the other team. Reporting again replaces your report.</p>}
-          <p className="muted small">Enter goals per game. {nameA} is listed first (blue).</p>
+          <p className="muted small">Enter the goals for each game. <span className="team-a">{nameA}</span> is on the left (blue).</p>
           <GamesEditor bestOf={m.bestOf} games={games} setGames={setGames} nameA={nameA} nameB={nameB} />
           <div className="spacer" />
-          <button className="btn primary" disabled={busy || clean(games).length === 0} onClick={submit}>Submit result</button>
+          <button className="btn primary large" disabled={busy || clean(games).length === 0} onClick={submit}>Submit result</button>
         </div>
       )}
 
-      {m.status === 'disputed' && <div className="alert warn">This result is disputed. An organizer will review it.</div>}
+      {m.status === 'disputed' && <Alert kind="warn">This result is disputed. An organizer will review it.</Alert>}
       <ErrorBox error={actErr} />
 
       {d.viewer.canManage && m.status !== 'pending' && !m.walkover && m.status !== 'void' && t.state !== 'completed' && (
@@ -171,7 +184,7 @@ export function MatchPage() {
                   <td><span className="badge">{r.kind.replace('_', ' ')}</span></td>
                   <td className="small">{r.userName ?? 'organizer'}{r.side ? ` (${r.side === 'a' ? nameA : nameB})` : ''}</td>
                   <td className="small">{r.winsA != null ? `${r.winsA}–${r.winsB}` : ''} {r.reason && <span className="muted">“{r.reason}”</span>}</td>
-                  <td className="tiny muted">{r.source}{r.superseded ? ' · superseded' : ''}</td>
+                  <td className="tiny muted">{r.source}{r.superseded ? ', replaced' : ''}</td>
                 </tr>
               ))}
             </tbody>

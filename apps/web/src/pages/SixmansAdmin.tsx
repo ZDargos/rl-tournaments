@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { FINALS_TEAM_FORMATION_LABELS, FINALS_TEAM_FORMATIONS } from '@rl/core';
-import { ErrorBox, Field, useToast } from '../components/ui';
+import { Alert, ErrorBox, Field, useToast } from '../components/ui';
 import { SixmansStandings } from '../components/standings';
 import { RoundsPreview } from '../components/sixmansRounds';
 
@@ -16,7 +16,7 @@ export function SixmansAdmin({ d, reload }: { d: any; reload: () => void }) {
   const steps = ['Make pools', 'Confirm pools', 'Schedule', 'Start', 'Group stage', 'Finals setup', 'Finals'];
   return (
     <div className="stack">
-      <div className="steps">{steps.map((s, i) => <span key={s} className={`step ${i < step ? 'done' : i === step ? 'current' : ''}`}>{i < step ? '✓ ' : ''}{s}</span>)}</div>
+      <ol className="steps" aria-label="6mans steps" style={{ listStyle: 'none', padding: 0 }}>{steps.map((s, i) => <li key={s} className={`step ${i < step ? 'done' : i === step ? 'current' : ''}`} aria-current={i === step ? 'step' : undefined}>{s}</li>)}</ol>
       {!started && <PoolsEditor d={d} names={names} reload={reload} />}
       {!started && sm.pools?.status === 'confirmed' && <ScheduleEditor d={d} names={names} reload={reload} />}
       {started && sm.standings?.length > 0 && (
@@ -27,7 +27,7 @@ export function SixmansAdmin({ d, reload }: { d: any; reload: () => void }) {
         </div>
       )}
       {t.stage === 'group_complete' && sm.finals && <FinalsEditor d={d} names={names} reload={reload} />}
-      {t.stage === 'finals' && <div className="alert ok">Finals are running. See the Finals bracket on the tournament page.</div>}
+      {t.stage === 'finals' && <Alert kind="ok">Finals are running. See the Finals bracket on the tournament page.</Alert>}
     </div>
   );
 }
@@ -49,7 +49,7 @@ function PoolsEditor({ d, names, reload }: { d: any; names: Map<string, string>;
   return (
     <div className="card">
       <div className="card-head">
-        <h3>1. Pools {confirmed && <span className="badge green">confirmed</span>}</h3>
+        <h3 className="row" style={{ gap: 10 }}>Pools {confirmed && <span className="badge green">confirmed</span>}</h3>
         <div className="row">
           <label className="row small muted">Pools <input type="number" min={1} max={32} value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 70 }} /></label>
           <button className="btn" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools`, { body: { poolCount: count } }))) { toast('Pools proposed'); reload(); } }}>{plan ? 'Re-make pools' : 'Make pools'}</button>
@@ -102,7 +102,7 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
   return (
     <div className="card">
       <div className="card-head">
-        <h3>2. Group-stage schedule {confirmed && <span className="badge green">confirmed</span>}</h3>
+        <h3 className="row" style={{ gap: 10 }}>Group-stage schedule {confirmed && <span className="badge green">confirmed</span>}</h3>
         <div className="row">
           <select aria-label="Rounds mode" value={mode} onChange={(e) => setMode(e.target.value as 'equal_games')}>
             <option value="equal_games">Equal games for everyone</option>

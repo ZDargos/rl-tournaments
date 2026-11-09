@@ -10,6 +10,7 @@ A free, self-hostable Rocket League tournament platform for Discord communities:
 - **Registration:** capacity, waitlist with automatic promotion, approval, required roles, check-in, and team invitations.
 - **Results:** a player reports, and a different player from the other team confirms. Disputes go to organizers, and corrections show which later matches they affect. A full audit trail is kept.
 - **Voice:** a private temporary voice channel per team (per player in 1v1). Connected players are moved in automatically. Channels are deleted when the match ends and reconciled after a restart.
+- **Date change votes:** organizers propose one new date and time with a reason; every registered player is asked by DM (and on a card in the registration channel and on the website) whether they can make it. Organizers see each answer, then move the start or keep it, and players are told either way.
 - **Notifications:** reminders, match-ready and confirmation requests, by channel or DM (organizer's choice). Players can opt out, and duplicates are prevented.
 - **Data:** history, player profiles and stats, CSV exports.
 - **Cost:** $0. No paid APIs, no AI services. See [docs/COST.md](docs/COST.md).
@@ -46,10 +47,14 @@ Open http://localhost:5173, choose **Log in**, then use the developer login form
 2. [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md): run the server, expose it with Tailscale Funnel, and publish the website on GitHub Pages.
 3. [docs/OPERATIONS.md](docs/OPERATIONS.md): backups, restore, upgrades, the launch checklist and troubleshooting.
 
+## Website design
+
+The website is built with Tailwind CSS v4, shadcn-style Radix components, lucide icons and sonner toasts. The design brief and the reasons for each tool are in [docs/DESIGN.md](docs/DESIGN.md).
+
 ## Tests
 
 ```bash
-npm test           # 85 unit, property-based and integration tests (vitest)
+npm test           # 143 unit, property-based and integration tests (vitest)
 npm run test:e2e   # browser end-to-end (Chromium via Playwright), needs `npm run build` first
 npm run typecheck
 ```
@@ -57,7 +62,7 @@ npm run typecheck
 - **`packages/core/test`:** bracket, Swiss and round-robin generation; series; lifecycle; permissions; and the 6mans algorithms. The 6mans tests are property-based: they generate many random pools (fixed seeds, so runs are reproducible) and check that a schedule never repeats a trio and that infeasibility is reported correctly.
 - **`apps/server/test`:** the real API and bot handlers against an in-memory database and a fake Discord. Covers OAuth, isolation and privacy, idempotency, format lock, confirmations, disputes, corrections, reminders, restart recovery and voice channels.
 - **`e2e/run-e2e.mjs`:** drives the built website in Chromium against a real server through:
-  - A full 1v1 bracket from login to champion.
+  - A full 1v1 bracket from login to champion, including a date change vote proposed, answered and closed in the UI.
   - A 6mans run through pools, schedule, group stage and finals.
   - A permission refusal.
   - Phone-width layout checks.

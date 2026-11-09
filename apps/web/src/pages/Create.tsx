@@ -1,17 +1,19 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { defaultConfig, validateConfig, type TournamentConfig } from '@rl/core';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync } from '../lib/hooks';
 import { ConfigForm } from '../components/ConfigForm';
-import { Empty, ErrorBox, Field, Spinner } from '../components/ui';
+import { KeyRound, Server } from 'lucide-react';
+import { Alert, Empty, ErrorBox, Field, Spinner } from '../components/ui';
 import { HELP } from '../components/settingHelp';
 import { localTz } from '../lib/format';
 
 export function CreatePage() {
   const { me, loading } = useAuth();
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const [guilds, setGuilds] = useState<any[] | null>(null);
   const [guildId, setGuildId] = useState('');
   const [presets, setPresets] = useState<any[]>([]);
@@ -29,9 +31,11 @@ export function CreatePage() {
     if (me) api<any[]>('/api/me/guilds').then((g) => {
       const can = g.filter((x) => x.canCreate);
       setGuilds(can);
-      if (can.length === 1) setGuildId(can[0].id);
+      const wanted = params.get('guild');
+      if (wanted && can.some((x) => x.id === wanted)) setGuildId(wanted);
+      else if (can.length === 1) setGuildId(can[0].id);
     }).catch(() => setGuilds([]));
-  }, [me]);
+  }, [me]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!guildId) return;
     api<any[]>(`/api/guilds/${guildId}/presets`).then(setPresets).catch(() => setPresets([]));
@@ -39,19 +43,23 @@ export function CreatePage() {
   }, [guildId]);
 
   if (loading) return <Spinner />;
-  if (!me) return <Empty icon="🔑" title="Log in to create a tournament"><Link to="/login?returnTo=/create">Log in with Discord</Link></Empty>;
+  if (!me) return <Empty icon={KeyRound} title="Log in to create a tournament"><Link className="btn discord" to="/login?returnTo=/create">Log in with Discord</Link></Empty>;
   if (!guilds) return <Spinner />;
   if (!guilds.length)
     return (
-      <Empty icon="🛠️" title="You cannot create tournaments in any server yet">
+      <Empty icon={Server} title="You can’t create tournaments in any server yet">
         Tournaments belong to a Discord server. The bot must be in the server, and by default only server admins (Manage Server) can create tournaments. A server admin can allow members or specific roles in the server settings.
       </Empty>
     );
   const problems = validateConfig(cfg);
   return (
     <div className="stack" style={{ maxWidth: 980, margin: '0 auto' }}>
-      <h1>Create a tournament</h1>
+      <div className="page-head" style={{ marginBottom: 0 }}>
+        <h1>Create a tournament</h1>
+        <p className="muted" style={{ margin: 0 }}>Pick the server and a name, choose the format, and you are ready. Everything can be changed until the tournament starts.</p>
+      </div>
       <div className="card">
+        <h2>The basics</h2>
         <div className="form-grid">
           <Field help={HELP.server} label="Discord server">
             <select value={guildId} onChange={(e) => { setGuildId(e.target.value); setPresetId(null); }}>
@@ -83,17 +91,20 @@ export function CreatePage() {
       </div>
       <div className="card">
         <div className="card-head">
-          <h2>Settings</h2>
+          <div>
+            <h2 style={{ marginBottom: 2 }}>Format and schedule</h2>
+            <p className="muted small" style={{ margin: 0 }}>{advanced ? 'Showing every setting.' : 'Showing the essentials. Results, Discord and voice settings use sensible defaults.'}</p>
+          </div>
           <label className="check small"><input type="checkbox" checked={advanced} onChange={(e) => setAdvanced(e.target.checked)} /> Show all settings</label>
         </div>
         <ConfigForm cfg={cfg} onChange={setCfg} sections={advanced ? 'all' : 'basic'} channels={channels} />
       </div>
-      {problems.length > 0 && <div className="alert warn"><strong>Please check:</strong><ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul></div>}
+      {problems.length > 0 && <Alert kind="warn"><strong>Please check:</strong><ul>{problems.map((p) => <li key={p}>{p}</li>)}</ul></Alert>}
       <ErrorBox error={error} />
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
+      <div className="card row between" style={{ position: 'sticky', bottom: 12, zIndex: 5, boxShadow: '0 16px 40px -12px rgb(0 0 0 / 0.8)' }}>
         <label className="check"><input type="checkbox" checked={publish} onChange={(e) => setPublish(e.target.checked)} /> Publish now (visible, registration not open yet)</label>
         <button
-          className="btn primary"
+          className="btn primary large"
           disabled={busy || !guildId || name.trim().length < 3 || problems.length > 0}
           onClick={async () => {
             const r = await run(() => api<{ id: number }>('/api/tournaments', { body: { guildId, name, description, visibility, presetId, config: cfg, publish } }));

@@ -27,8 +27,8 @@ export function MatchCard({ m, mine, showLabel }: { m: MatchDto; mine?: boolean;
   return (
     <Link to={`/m/${m.id}`} className={`mcard ${mine ? 'mine' : ''}`} aria-label={`Match ${m.id}`}>
       {showLabel && <div className="foot" style={{ background: 'transparent' }}><span>{m.label}</span></div>}
-      <div className={`side ${sideClass(m, 'a')}`}><span>{name('a')}</span><span className="score">{score('a')}</span></div>
-      <div className={`side ${sideClass(m, 'b')}`}><span>{name('b')}</span><span className="score">{score('b')}</span></div>
+      <div className={`side a ${sideClass(m, 'a')}`}><span>{name('a')}</span><span className="score">{score('a')}</span></div>
+      <div className={`side b ${sideClass(m, 'b')}`}><span>{name('b')}</span><span className="score">{score('b')}</span></div>
       <div className="foot">
         <span>#{m.id} · Bo{m.bestOf}</span>
         {m.walkover ? <span>bye</span> : m.status === 'completed' ? <span>final</span> : <span>{m.status === 'ready' ? (m.liveGames?.length ? 'live (unofficial)' : 'ready') : m.status.replace(/_/g, ' ')}</span>}
@@ -92,7 +92,7 @@ export function RoundsView({ matches, myIds = [], groupBy = 'round' }: { matches
     <div className="stack">
       {rounds.map((r) => (
         <div key={r}>
-          <h3>Round {r}</h3>
+          <h3 className="muted">Round {r}</h3>
           <div className="grid auto">
             {matches.filter((m) => m.round === r).map((m) => <MatchCard key={m.id} m={m} mine={myIds.includes(m.id)} showLabel />)}
           </div>
@@ -107,12 +107,12 @@ export function MatchList({ matches, myIds = [] }: { matches: MatchDto[]; myIds?
     <div className="table-wrap">
       <table className="table">
         <thead>
-          <tr><th>#</th><th>Match</th><th>Blue (A)</th><th className="num">Score</th><th>Orange (B)</th><th>Status</th></tr>
+          <tr><th>#</th><th>Match</th><th>Blue side</th><th className="num">Score</th><th>Orange side</th><th>Status</th></tr>
         </thead>
         <tbody>
           {matches.map((m) => (
             <tr key={m.id} className={myIds.includes(m.id) ? 'highlight' : ''}>
-              <td className="mono">{m.id}</td>
+              <td className="mono faint">{m.id}</td>
               <td><Link to={`/m/${m.id}`}>{m.label}</Link></td>
               <td className={m.winner === 'a' ? 'team-a' : ''} style={{ fontWeight: m.winner === 'a' ? 750 : 400 }}>{m.a?.name ?? <span className="tbd">TBD</span>}</td>
               <td className="num">{m.status === 'completed' ? (m.walkover ? 'bye' : m.forfeit ? 'FF' : `${m.winsA}–${m.winsB}`) : '—'}</td>

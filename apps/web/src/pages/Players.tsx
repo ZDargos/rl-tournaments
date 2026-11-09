@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { Search, Trophy } from 'lucide-react';
 import { Avatar, Empty, ErrorBox, Spinner, StateBadge } from '../components/ui';
 import { fmtDate } from '../lib/format';
 
@@ -15,11 +16,18 @@ export function PlayersPage() {
   }, [q]);
   return (
     <div className="stack">
-      <h1>Players</h1>
-      <input placeholder="Search by Discord name…" value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
+      <div>
+        <h1>Players</h1>
+        <p className="muted" style={{ margin: 0 }}>Look up anyone with a public profile to see their record and history.</p>
+      </div>
+      <div className="relative" style={{ maxWidth: 520 }}>
+        <Search aria-hidden className="faint absolute" style={{ left: 12, top: 12, width: 17, height: 17 }} />
+        <input placeholder="Search by Discord name" aria-label="Search players" value={q} onChange={(e) => setQ(e.target.value)} autoFocus style={{ paddingLeft: 38, minHeight: 42 }} />
+      </div>
+      {!rows && <p className="faint small" style={{ margin: 0 }}>Type at least two letters.</p>}
       <ErrorBox error={err} />
-      {rows && rows.length === 0 && <Empty icon="🔎" title="No players found">Only players with a public profile appear in search.</Empty>}
-      {rows && <div className="grid cols-3">{rows.map((u) => <Link key={u.id} to={`/p/${u.id}`} className="card row"><Avatar name={u.displayName} url={u.avatarUrl} /><div><strong>{u.displayName}</strong><div className="muted small">@{u.username}</div></div></Link>)}</div>}
+      {rows && rows.length === 0 && <Empty icon={Search} title="No players found">Only players with a public profile appear in search.</Empty>}
+      {rows && <div className="grid cols-3">{rows.map((u) => <Link key={u.id} to={`/p/${u.id}`} className="card row tcard" style={{ flexDirection: 'row' }}><Avatar name={u.displayName} url={u.avatarUrl} /><div><strong>{u.displayName}</strong><div className="muted small">@{u.username}</div></div></Link>)}</div>}
     </div>
   );
 }
@@ -35,15 +43,15 @@ export function PlayerPage() {
   const pct = (w: number, n: number) => (n ? `${Math.round((w / n) * 100)}%` : '—');
   return (
     <div className="stack">
-      <div className="row">
-        <Avatar name={d.user.displayName} url={d.user.avatarUrl} />
-        <div><h1>{d.user.displayName}</h1><div className="muted">@{d.user.username}{!d.profilePublic && ' · profile is private (only you can see this)'}</div></div>
+      <div className="row" style={{ gap: 14 }}>
+        <Avatar name={d.user.displayName} url={d.user.avatarUrl} size="lg" />
+        <div><h1 style={{ margin: 0 }}>{d.user.displayName}</h1><div className="muted">@{d.user.username}{!d.profilePublic && ' · profile is private (only you can see this)'}</div></div>
       </div>
       <div className="grid cols-4">
-        <div className="card stat"><div className="muted small">Tournaments</div><div className="big">{t.tournaments}</div></div>
-        <div className="card stat"><div className="muted small">Titles 🏆</div><div className="big">{t.titles}</div></div>
-        <div className="card stat"><div className="muted small">Series W–L</div><div className="big">{t.team.wins}–{t.team.losses}</div><div className="muted tiny">{pct(t.team.wins, t.team.matches)} · games {t.team.gamesWon}–{t.team.gamesLost}</div></div>
-        <div className="card stat"><div className="muted small">6mans group W–L</div><div className="big">{t.sixmans.wins}–{t.sixmans.losses}</div><div className="muted tiny">{t.sixmans.points} pts · GD {t.sixmans.goalsFor - t.sixmans.goalsAgainst >= 0 ? '+' : ''}{t.sixmans.goalsFor - t.sixmans.goalsAgainst}</div></div>
+        <div className="card stat"><div className="label">Tournaments</div><div className="big">{t.tournaments}</div></div>
+        <div className="card stat"><div className="label row" style={{ gap: 6 }}><Trophy aria-hidden width={15} height={15} />Titles</div><div className="big">{t.titles}</div></div>
+        <div className="card stat"><div className="label">Series won–lost</div><div className="big">{t.team.wins}–{t.team.losses}</div><div className="muted tiny">{pct(t.team.wins, t.team.matches)} · games {t.team.gamesWon}–{t.team.gamesLost}</div></div>
+        <div className="card stat"><div className="label">6mans group won–lost</div><div className="big">{t.sixmans.wins}–{t.sixmans.losses}</div><div className="muted tiny">{t.sixmans.points} pts · GD {t.sixmans.goalsFor - t.sixmans.goalsAgainst >= 0 ? '+' : ''}{t.sixmans.goalsFor - t.sixmans.goalsAgainst}</div></div>
       </div>
       <div className="card">
         <h3>History</h3>

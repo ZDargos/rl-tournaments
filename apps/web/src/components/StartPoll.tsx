@@ -3,6 +3,7 @@ import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { fmtDate, relTime } from '../lib/format';
 import { useAuth } from '../lib/auth';
+import { Vote } from 'lucide-react';
 import { ConfirmButton, ErrorBox, Help, useToast } from './ui';
 
 const POLL_HELP =
@@ -23,7 +24,7 @@ export function StartPollAdmin({ d, reload, openSettings }: { d: any; reload: ()
 
   return (
     <div className="card">
-      <h3>Start time vote<Help text={POLL_HELP} /></h3>
+      <h3 className="section-title"><Vote aria-hidden />Start time vote<Help text={POLL_HELP} /></h3>
       {p && p.status === 'open' && (
         <>
           <p className="muted small">Voting closes {fmtDate(p.closesAt, tz)} ({relTime(p.closesAt)}). {p.voterCount} player{p.voterCount === 1 ? '' : 's'} voted.{!p.cardPosted && ' The Discord card is not posted (no channel, or the bot cannot post there), so players can only vote on the website.'}</p>
@@ -79,7 +80,7 @@ function PollResults({ p, tz }: { p: any; tz: string }) {
         const row = (
           <>
             <span style={{ minWidth: 190, textAlign: 'left' }}>{canSee && <span aria-hidden className="muted">{open === o.index ? '▾ ' : '▸ '}</span>}{p.winner === o.index ? '🏆 ' : `#${n + 1} `}{fmtDate(o.at, tz)}</span>
-            <div style={{ flex: 1, height: 8, background: 'var(--line)', borderRadius: 4 }}>
+            <div style={{ flex: 1, height: 8, background: 'var(--color-pitch)', borderRadius: 4 }}>
               <div style={{ width: `${(o.votes / max) * 100}%`, height: '100%', background: 'var(--blue)', borderRadius: 4 }} />
             </div>
             <span style={{ minWidth: 60, textAlign: 'right' }}>{o.votes} vote{o.votes === 1 ? '' : 's'}</span>
@@ -135,12 +136,15 @@ export function StartPollVote({ d, reload }: { d: any; reload: () => void }) {
     }
   };
   return (
-    <div className="card" style={{ borderColor: 'var(--blue)' }}>
-      <h2>🗳️ When should it start?</h2>
+    <div className="card accent-blue">
+      <div className="todo">
+      <div className="todo-icon blue"><Vote aria-hidden /></div>
+      <div className="todo-body">
+      <h3>When should it start?</h3>
       <p className="muted small">Tick every time that works for you. Voting closes {fmtDate(p.closesAt)} ({relTime(p.closesAt)}). If a time you picked wins, you’re registered automatically.</p>
       <div className="stack" style={{ gap: 6 }}>
         {p.options.map((o: any) => (
-          <label key={o.index} className="row" style={{ gap: 8, flexWrap: 'nowrap', cursor: me ? 'pointer' : 'default' }}>
+          <label key={o.index} className="row" style={{ gap: 10, flexWrap: 'nowrap', cursor: me ? 'pointer' : 'default', padding: '8px 10px', borderRadius: 9, border: '1px solid var(--line)', background: o.mine ? 'rgb(59 139 255 / 0.1)' : 'var(--color-pitch)' }}>
             <input type="checkbox" checked={o.mine} disabled={!me || busy} onChange={() => void toggle(o.index)} />
             <span style={{ flex: 1 }}>{fmtDate(o.at)}</span>
             <span className="muted small">{o.votes} vote{o.votes === 1 ? '' : 's'}</span>
@@ -149,6 +153,8 @@ export function StartPollVote({ d, reload }: { d: any; reload: () => void }) {
       </div>
       {!me && <p className="muted small" style={{ marginTop: 8 }}>Log in to vote.</p>}
       <ErrorBox error={error} />
+      </div>
+      </div>
     </div>
   );
 }
