@@ -51,6 +51,7 @@ export function App() {
   );
   return (
     <>
+      <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
       <header className="header">
         <div className="container">
           <Link to="/" className="brand">
@@ -80,7 +81,7 @@ export function App() {
           </div>
         </div>
       </header>
-      <main>
+      <main id="main" tabIndex={-1} style={{ outline: 'none' }}>
         <div className="container">
           {API_MISSING ? (
             <Alert kind="warn" className="mb-4">

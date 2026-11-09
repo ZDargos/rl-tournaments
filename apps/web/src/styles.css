@@ -24,7 +24,7 @@
   --color-line: #24355a;
   --color-ink: #eaf0fa;
   --color-dim: #96a3c0;
-  --color-faint: #6e7d9c;
+  --color-faint: #8a99b8; /* 4.5:1+ on every surface, incl. raised menus (ui-ux-pro-max color-contrast) */
   /* The two teams. Blue is side A, orange is side B and the "boost" for primary actions. */
   --color-blue: #3b8bff;
   --color-blue-soft: #82b6ff;
@@ -56,7 +56,7 @@
 }
 
 @layer base {
-  html { -webkit-text-size-adjust: 100%; }
+  html { -webkit-text-size-adjust: 100%; scroll-padding-top: 76px; /* keep focused fields clear of the sticky header */ }
   html, body, #root { min-height: 100%; }
   body {
     margin: 0;
@@ -75,7 +75,8 @@
   #root { display: flex; flex-direction: column; }
   a { color: var(--blue2); text-decoration: none; }
   a:hover { text-decoration: underline; text-underline-offset: 3px; }
-  h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; margin: 0 0 0.55rem; letter-spacing: 0.005em; font-weight: 700; }
+  h1, h2, h3, h4 { font-family: var(--font-display); line-height: 1.1; margin: 0 0 0.55rem; letter-spacing: 0.005em; font-weight: 700; text-wrap: balance; }
+  p { text-wrap: pretty; }
   h1 { font-size: clamp(1.9rem, 4vw, 2.6rem); font-weight: 800; }
   h2 { font-size: 1.45rem; }
   h3 { font-size: 1.22rem; }
@@ -85,6 +86,10 @@
   pre { white-space: pre-wrap; background: var(--panel2); padding: 0.8rem; border-radius: 10px; border: 1px solid var(--line); overflow: auto; }
   ::selection { background: rgb(59 139 255 / 0.35); }
   :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  /* Remove the 300ms tap delay and the grey flash on mobile; our own :active states give feedback. */
+  a, button, summary, label, select, [role='button'], [role='tab'], [role='menuitem'] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  /* Under 16px, iOS Safari zooms the page when a field is focused. */
+  @media (max-width: 640px) { input, select, textarea { font-size: 16px !important; } }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
@@ -92,6 +97,8 @@
 
 @layer components {
   .container { width: 100%; max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+  .skip-link { position: absolute; left: 12px; top: -60px; z-index: 100; padding: 10px 14px; border-radius: 9px; background: var(--orange); color: #1a0d00; font-weight: 700; }
+  .skip-link:focus { top: 10px; text-decoration: none; }
   @media (min-width: 768px) { .container { padding: 0 24px; } }
 
   /* ---------- App shell ---------- */
@@ -232,7 +239,7 @@
   input[type='checkbox'], input[type='radio'] { width: 17px; height: 17px; min-height: 0; padding: 0; accent-color: var(--orange); flex: none; cursor: pointer; }
   input[type='number'] { font-variant-numeric: tabular-nums; }
   textarea { min-height: 96px; resize: vertical; }
-  .help { display: inline-grid; place-items: center; width: 17px; height: 17px; margin-left: 5px; border-radius: 50%; color: var(--color-faint); cursor: help; vertical-align: -3px; user-select: none; }
+  .help { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -4px -4px -4px 1px; border-radius: 50%; color: var(--color-faint); cursor: help; vertical-align: -3px; user-select: none; }
   .help svg { width: 15px; height: 15px; }
   .help:hover, .help:focus-visible { color: var(--blue2); outline: none; }
   .help-tip { position: fixed; z-index: 1000; padding: 10px 12px; border-radius: 10px; background: var(--color-raised); border: 1px solid var(--line); box-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.7); color: var(--text); font-size: 0.85rem; font-weight: 450; line-height: 1.45; text-align: left; white-space: normal; pointer-events: none; }
@@ -403,6 +410,8 @@
   .todo-icon svg { width: 18px; height: 18px; }
   .todo-body { flex: 1; min-width: 0; }
   .todo-body h3 { margin: 0 0 4px; }
+  /* Phones: give the question the full card width instead of indenting it under the icon. */
+  @media (max-width: 520px) { .todo-icon { display: none; } }
 
   .bar { flex: 1; height: 8px; background: var(--color-pitch); border-radius: 4px; overflow: hidden; }
   .bar > span { display: block; height: 100%; border-radius: 4px; background: var(--blue); }
@@ -419,4 +428,18 @@
     .hide-sm { display: none !important; }
   }
   @media (min-width: 761px) { .show-sm { display: none !important; } }
+
+  /* Touch screens: 44px targets for anything tappable (ui-ux-pro-max touch-target-size). */
+  @media (pointer: coarse) {
+    .btn { min-height: 44px; }
+    .btn.small { min-height: 38px; padding: 6px 12px; }
+    .icon-btn, .btn.small.icon-btn { min-height: 44px; width: 44px; }
+    input, select { min-height: 44px; }
+    .segmented button { min-height: 38px; }
+    .tabs button { min-height: 44px; }
+    .menu-item { min-height: 44px; }
+    .userchip { min-height: 44px; }
+    .check { min-height: 32px; }
+    .nav a, .sheet a { min-height: 44px; }
+  }
 }

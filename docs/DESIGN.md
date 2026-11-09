@@ -13,6 +13,33 @@ This is the brief the website was redesigned from, plus the tools it is built wi
 | Barlow + Barlow Condensed (`@fontsource/*`) | Self-hosted, so no third-party font requests. |
 | [Anthropic's `frontend-design` skill](https://github.com/anthropics/skills/tree/main/skills/frontend-design) | Installed in `.claude/skills/frontend-design/`. Claude Code loads it automatically when working on the UI in this repo, so future changes follow the same design discipline. |
 
+## Claude Code design setup
+
+These skills live in `.claude/skills/` and load automatically when Claude Code works on the UI in this repo.
+
+| Skill | Source | What it does here |
+|---|---|---|
+| `frontend-design` | [anthropics/skills](https://github.com/anthropics/skills) (Apache 2.0) | Anthropic's official design skill, and the most installed one. It picks one clear visual direction before writing any code and steers away from generic "AI-made" layouts. |
+| `ui-ux-pro-max` | [nextlevelbuilder/ui-ux-pro-max-skill](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill) (MIT) | The most-starred community design skill. It includes searchable data (styles, palettes, font pairings, 120 UX rules and React/Tailwind stack guides) and a checklist covering accessibility, touch, layout and contrast. `references/quick-reference.md` is the audit list. |
+| `web-design-guidelines` | [vercel-labs/agent-skills](https://github.com/vercel-labs/agent-skills) (MIT) | Vercel's Web Interface Guidelines, used to review pages ("review my UI"). It reports findings as `file:line`. |
+
+The `ui-ux-pro-max` search command runs from the repo root as `python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`. Its install path was changed from the plugin layout to the project layout.
+
+These skills were considered and left out:
+- **taste-skill.** It is built for marketing landing pages: photos, shader effects, one section per screen. It also adds a stop hook that runs its own browser checks after every turn. Neither suits an app UI.
+- **Agent bundles** such as wshobson/agents and awesome-claude-code-subagents. They are general purpose, so they add little for design.
+
+The audit with these skills changed the following:
+- Muted text was below 4.5:1 contrast on panels and menus. It is now 4.9:1 or higher on every surface.
+- Added a "Skip to content" link.
+- Tap targets are at least 44px on touch screens.
+- Inputs use 16px text on phones so iOS doesn't zoom in.
+- The tap delay and grey tap flash are gone on mobile.
+- Focused fields scroll clear of the sticky header.
+- Headings wrap in balanced lines.
+- The setting help (ⓘ) targets grew to 24px.
+- The "needs you" cards use the full width on phones.
+
 Native `<input>` and `<select>` are kept (styled) on purpose: they work best on phones and with autofill.
 
 ## The brief (redesign prompt)
