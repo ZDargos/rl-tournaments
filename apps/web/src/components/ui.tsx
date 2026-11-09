@@ -1,11 +1,29 @@
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Dialog, Tabs as RTabs } from 'radix-ui';
+import { Toaster, toast as sonner } from 'sonner';
+import { AlertTriangle, CheckCircle2, Info, Search, X, XCircle, type LucideIcon } from 'lucide-react';
 import { STATE_LABELS, type TournamentState } from '@rl/core';
+
+/** Tailwind-friendly class joiner (shadcn's `cn`). */
+export const cn = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(' ');
 
 export function Spinner({ label }: { label?: string }) {
   return (
     <div className="center" role="status" aria-live="polite">
       <div className="spinner" />
-      {label && <div className="muted small" style={{ marginTop: 8 }}>{label}</div>}
+      {label && <div className="muted small" style={{ marginTop: 10 }}>{label}</div>}
+    </div>
+  );
+}
+
+const ALERT_ICON: Record<string, LucideIcon> = { error: XCircle, warn: AlertTriangle, ok: CheckCircle2, info: Info };
+
+/** A message box. `kind` picks the color and icon. */
+export function Alert({ kind = 'info', children, className, icon = true }: { kind?: 'error' | 'warn' | 'ok' | 'info'; children: ReactNode; className?: string; icon?: boolean }) {
+  const Icon = ALERT_ICON[kind];
+  return (
+    <div className={cn('alert', kind, icon && 'with-icon', className)} role={kind === 'error' ? 'alert' : undefined}>
+      {icon ? <><Icon aria-hidden /><div>{children}</div></> : children}
     </div>
   );
 }
@@ -15,7 +33,7 @@ export function ErrorBox({ error, title }: { error: any; title?: string }) {
   const msg = typeof error === 'string' ? error : error.message ?? String(error);
   const problems: string[] | undefined = error?.details?.problems;
   return (
-    <div className="alert error" role="alert">
+    <Alert kind="error">
       {title && <strong>{title} </strong>}
       {msg}
       {problems && problems.length > 0 && (
@@ -23,16 +41,16 @@ export function ErrorBox({ error, title }: { error: any; title?: string }) {
           {problems.map((p) => <li key={p}>{p}</li>)}
         </ul>
       )}
-    </div>
+    </Alert>
   );
 }
 
-export function Empty({ icon = '🏟️', title, children }: { icon?: string; title: string; children?: ReactNode }) {
+export function Empty({ icon: Icon = Search, title, children }: { icon?: LucideIcon; title: string; children?: ReactNode }) {
   return (
     <div className="empty">
-      <div className="big">{icon}</div>
-      <div style={{ fontWeight: 700, color: 'var(--text)' }}>{title}</div>
-      {children && <div className="small" style={{ marginTop: 6 }}>{children}</div>}
+      <div className="empty-icon"><Icon aria-hidden /></div>
+      <div className="title">{title}</div>
+      {children && <div className="small" style={{ maxWidth: 520 }}>{children}</div>}
     </div>
   );
 }
@@ -43,7 +61,7 @@ const STATE_COLOR: Record<string, string> = {
 };
 export function StateBadge({ state }: { state: TournamentState | string }) {
   return (
-    <span className={`badge ${STATE_COLOR[state] ?? ''} ${state === 'in_progress' ? 'live' : ''}`}>
+    <span className={cn('badge', STATE_COLOR[state], state === 'in_progress' && 'live')}>
       {state === 'in_progress' && <span className="dot" />}
       {STATE_LABELS[state as TournamentState] ?? state}
     </span>
@@ -53,7 +71,7 @@ export function StateBadge({ state }: { state: TournamentState | string }) {
 const MATCH_COLOR: Record<string, string> = { pending: '', ready: 'orange', awaiting_confirmation: 'yellow', disputed: 'red', completed: 'green', void: '', cancelled: 'red' };
 const MATCH_LABEL: Record<string, string> = { pending: 'Waiting', ready: 'Live', awaiting_confirmation: 'Awaiting confirmation', disputed: 'Disputed', completed: 'Final', void: 'Not played', cancelled: 'Cancelled' };
 export function MatchBadge({ status }: { status: string }) {
-  return <span className={`badge ${MATCH_COLOR[status] ?? ''}`}>{MATCH_LABEL[status] ?? status}</span>;
+  return <span className={cn('badge', MATCH_COLOR[status])}>{MATCH_LABEL[status] ?? status}</span>;
 }
 
 const AVAILABILITY: Record<string, { color: string; label: string; tip: string }> = {
@@ -67,11 +85,11 @@ export const AVAILABILITY_ORDER = ['confirmed', 'declined', 'maybe', 'awaiting',
 export function AvailabilityBadge({ status }: { status?: string | null }) {
   if (!status) return null;
   const a = AVAILABILITY[status] ?? AVAILABILITY.not_asked;
-  return <span className={`badge ${a.color}`} title={a.tip}>{a.label}</span>;
+  return <span className={cn('badge', a.color)} title={a.tip}>{a.label}</span>;
 }
 
-export function Avatar({ name, url }: { name: string; url?: string | null }) {
-  return <span className="avatar">{url ? <img src={url} alt="" referrerPolicy="no-referrer" /> : (name || '?').slice(0, 1).toUpperCase()}</span>;
+export function Avatar({ name, url, size }: { name: string; url?: string | null; size?: 'lg' }) {
+  return <span className={cn('avatar', size)}>{url ? <img src={url} alt="" referrerPolicy="no-referrer" /> : (name || '?').slice(0, 1).toUpperCase()}</span>;
 }
 
 /**
@@ -115,9 +133,9 @@ export function Help({ text }: { text: string }) {
         show(); // on phones a tap focuses and clicks; tapping elsewhere (blur) closes it
       }}
     >
-      ⓘ
+      <Info aria-hidden />
       {pos && (
-        <span id={tipId} role="tooltip" className={`help-tip${pos.above ? ' above' : ''}`} style={{ top: pos.top, left: pos.left, width: Math.min(300, window.innerWidth - 16) }}>
+        <span id={tipId} role="tooltip" className={cn('help-tip', pos.above && 'above')} style={{ top: pos.top, left: pos.left, width: Math.min(300, window.innerWidth - 16) }}>
           {text}
         </span>
       )}
@@ -125,9 +143,9 @@ export function Help({ text }: { text: string }) {
   );
 }
 
-export function Field({ label, hint, help, children }: { label: string; hint?: ReactNode; help?: string; children: ReactNode }) {
+export function Field({ label, hint, help, children, className }: { label: string; hint?: ReactNode; help?: string; children: ReactNode; className?: string }) {
   return (
-    <label className="field">
+    <label className={cn('field', className)}>
       <span>{label}{help && <Help text={help} />}</span>
       {children}
       {hint && <span className="hint">{hint}</span>}
@@ -144,71 +162,97 @@ export function Check({ label, checked, onChange, disabled, help }: { label: Rea
   );
 }
 
-export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: T; label: ReactNode }[]; value: T; onChange: (v: T) => void }) {
+/** Pick one of a few options (filters). Buttons with aria-pressed, so it reads as a toggle group. */
+export function Segmented<T extends string>({ options, value, onChange, label }: { options: { id: T; label: ReactNode }[]; value: T; onChange: (v: T) => void; label: string }) {
   return (
-    <div className="tabs" role="tablist">
-      {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={value === t.id} className={value === t.id ? 'active' : ''} onClick={() => onChange(t.id)}>
-          {t.label}
-        </button>
+    <div className="segmented" role="group" aria-label={label}>
+      {options.map((o) => (
+        <button key={o.id} type="button" aria-pressed={value === o.id} onClick={() => onChange(o.id)}>{o.label}</button>
       ))}
     </div>
   );
 }
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export type TabDef<T extends string> = { id: T; label: ReactNode; icon?: LucideIcon; count?: number };
+
+/** Accessible tab strip (Radix: arrow keys move between tabs). The page renders the active panel. */
+export function Tabs<T extends string>({ tabs, value, onChange, orientation = 'horizontal', children, className }: { tabs: TabDef<T>[]; value: T; onChange: (v: T) => void; orientation?: 'horizontal' | 'vertical'; children?: ReactNode; className?: string }) {
   return (
-    <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-label={title}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}>
-        <div className="card-head">
-          <h3>{title}</h3>
-          <button className="btn ghost small" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <RTabs.Root value={value} onValueChange={(v) => onChange(v as T)} orientation={orientation} className={className} activationMode="manual">
+      <RTabs.List className="tabs" aria-label="Sections">
+        {tabs.map((t) => (
+          <RTabs.Trigger key={t.id} value={t.id}>
+            {t.icon && <t.icon aria-hidden />}
+            {t.label}
+            {t.count != null && <span className="tab-count">{t.count}</span>}
+          </RTabs.Trigger>
+        ))}
+      </RTabs.List>
+      {children && <div className="min-w-0">{children}</div>}
+    </RTabs.Root>
   );
 }
 
-type Toast = { id: number; text: string; kind: 'ok' | 'error' | 'info' };
-const ToastCtx = createContext<(text: string, kind?: Toast['kind']) => void>(() => {});
-export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((text: string, kind: Toast['kind'] = 'ok') => {
-    const id = Date.now() + Math.random();
-    setToasts((t) => [...t, { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
-  }, []);
+/** Dialog with focus trap, Escape to close and scroll lock (Radix). */
+export function Modal({ title, onClose, children, description }: { title: string; onClose: () => void; children: ReactNode; description?: string }) {
   return (
-    <ToastCtx.Provider value={push}>
-      {children}
-      <div className="toasts" aria-live="polite">
-        {toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>)}
-      </div>
-    </ToastCtx.Provider>
+    <Dialog.Root open onOpenChange={(o) => !o && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-backdrop" />
+        <Dialog.Content className="card modal" aria-describedby={description ? undefined : undefined}>
+          <div className="card-head">
+            <Dialog.Title asChild><h3>{title}</h3></Dialog.Title>
+            <Dialog.Close className="btn ghost small icon-btn" aria-label="Close"><X /></Dialog.Close>
+          </div>
+          {description ? <Dialog.Description className="muted small">{description}</Dialog.Description> : <Dialog.Description className="sr-only">{title}</Dialog.Description>}
+          {children}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
-export const useToast = () => useContext(ToastCtx);
+
+type ToastKind = 'ok' | 'error' | 'info';
+const push = (text: string, kind: ToastKind = 'ok') => {
+  if (kind === 'error') sonner.error(text);
+  else if (kind === 'info') sonner.info(text);
+  else sonner.success(text);
+};
+export function ToastProvider({ children }: { children: ReactNode }) {
+  return (
+    <>
+      {children}
+      <Toaster
+        theme="dark"
+        position="bottom-right"
+        duration={5000}
+        toastOptions={{ style: { background: 'var(--color-raised)', border: '1px solid var(--color-line)', color: 'var(--color-ink)', fontFamily: 'var(--font-sans)', fontSize: '0.94rem' } }}
+      />
+    </>
+  );
+}
+export const useToast = () => push;
 
 /** Confirm-before-acting button with an optional reason prompt. */
-export function ConfirmButton({ label, confirm, onConfirm, className = 'btn', reason, disabled }: { label: ReactNode; confirm: string; onConfirm: (reason: string) => Promise<unknown> | void; className?: string; reason?: 'required' | 'optional'; disabled?: boolean }) {
+export function ConfirmButton({ label, confirm, onConfirm, className = 'btn', reason, disabled, confirmLabel = 'Confirm' }: { label: ReactNode; confirm: string; onConfirm: (reason: string) => Promise<unknown> | void; className?: string; reason?: 'required' | 'optional'; disabled?: boolean; confirmLabel?: string }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   return (
     <>
-      <button className={className} onClick={() => setOpen(true)} disabled={disabled}>{label}</button>
+      <button type="button" className={className} onClick={() => setOpen(true)} disabled={disabled}>{label}</button>
       {open && (
         <Modal title="Please confirm" onClose={() => setOpen(false)}>
           <p>{confirm}</p>
           {reason && (
-            <Field label={reason === 'required' ? 'Reason (kept in the audit log)' : 'Reason (optional)'}>
+            <Field label={reason === 'required' ? 'Reason (kept in the activity log)' : 'Reason (optional)'}>
               <input autoFocus value={text} onChange={(e) => setText(e.target.value)} maxLength={300} />
             </Field>
           )}
-          <div className="row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
-            <button className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
+          <div className="row end" style={{ marginTop: 16 }}>
+            <button type="button" className="btn ghost" onClick={() => setOpen(false)}>Cancel</button>
             <button
+              type="button"
               className="btn primary"
               disabled={busy || (reason === 'required' && text.trim().length < 3)}
               onClick={async () => {
@@ -221,7 +265,7 @@ export function ConfirmButton({ label, confirm, onConfirm, className = 'btn', re
                 }
               }}
             >
-              Confirm
+              {confirmLabel}
             </button>
           </div>
         </Modal>

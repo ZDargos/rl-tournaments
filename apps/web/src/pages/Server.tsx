@@ -41,10 +41,10 @@ export function ServerPage() {
     <div className="stack">
       <div className="row between">
         <div className="row">
-          {g.iconUrl ? <img src={g.iconUrl} alt="" width={48} height={48} style={{ borderRadius: 12 }} /> : null}
-          <h1>{g.name}</h1>
+          {g.iconUrl ? <img src={g.iconUrl} alt="" width={52} height={52} style={{ borderRadius: 14 }} /> : null}
+          <h1 style={{ margin: 0 }}>{g.name}</h1>
         </div>
-        {g.canCreate && <Link className="btn primary" to={`/create?guild=${g.id}`}>New tournament</Link>}
+        {g.canCreate && <Link className="btn primary" to={`/create?guild=${g.id}`}>Create a tournament</Link>}
       </div>
       {!g.botPresent && <div className="alert warn">The bot is not in this server, so voice channels, announcements and DMs won’t work. Ask a server admin to invite it (see the setup guide).</div>}
       <div className="grid cols-2">
@@ -90,7 +90,7 @@ export function ServerPage() {
         </div>
       </div>
       <h2>Tournaments</h2>
-      {tournaments.length === 0 ? <Empty title="No tournaments in this server yet" /> : <div className="grid cols-3">{tournaments.map((t) => <TournamentCard key={t.id} t={t} />)}</div>}
+      {tournaments.length === 0 ? <Empty title="No tournaments in this server yet" /> : <div className="grid auto">{tournaments.map((t) => <TournamentCard key={t.id} t={t} />)}</div>}
     </div>
   );
 }
@@ -115,7 +115,7 @@ export function PresetPage() {
   const canEdit = !!g?.canManagePresets;
   return (
     <div className="stack">
-      <Link to={`/s/${p.guildId}`}>← {g?.name ?? 'Server'}</Link>
+      <Link className="crumb" to={`/s/${p.guildId}`}>← {g?.name ?? 'Server'}</Link>
       <div className="card">
         <div className="form-grid">
           <Field label="Preset name"><input value={p.name} disabled={!canEdit} onChange={(e) => setP({ ...p, name: e.target.value })} maxLength={60} /></Field>

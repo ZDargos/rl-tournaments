@@ -49,10 +49,11 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
       <input value={value ?? ''} placeholder="Channel id, e.g. 123456789012345678" onChange={(e) => onPick(e.target.value.trim() || null)} />
     );
   return (
-    <div className="stack">
-      {locked && <div className="alert info">The tournament has started: format, registration and structure settings are locked. Notifications, voice and display settings can still change.</div>}
-      <section>
+    <div>
+      {locked && <div className="alert info" style={{ marginBottom: 18 }}>The tournament has started: format, registration and structure settings are locked. Notifications, voice and display settings can still change.</div>}
+      <section className="form-section">
         <h3>Format</h3>
+        <p className="section-desc">How matches are played and how many people take part.</p>
         <div className="form-grid">
           <Field help={HELP.format} label="Format">
             <select value={cfg.format} disabled={locked} onChange={(e) => set((c) => void (c.format = e.target.value as Cfg['format']))}>
@@ -82,13 +83,13 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
             <input type="number" min={2} max={512} value={cfg.minEntrants} disabled={locked} onChange={(e) => set((c) => void (c.minEntrants = num(e.target.value, 2)!))} />
           </Field>
         </div>
-        <div className="row" style={{ marginTop: 10, gap: 20 }}>
+        <div className="checks" style={{ marginTop: 16 }}>
           {!six && <Check help={HELP.requireGameScores} label="Require goals for every game" checked={cfg.series.requireGameScores} disabled={locked} onChange={(v) => set((c) => void (c.series.requireGameScores = v))} />}
           {cfg.format === 'single_elim' && <Check help={HELP.thirdPlaceMatch} label="Third-place match" checked={cfg.singleElim.thirdPlaceMatch} disabled={locked} onChange={(v) => set((c) => void (c.singleElim.thirdPlaceMatch = v))} />}
           {cfg.format === 'double_elim' && <Check help={HELP.grandFinalReset} label="Grand-final reset (bracket reset if the losers-side team wins)" checked={cfg.doubleElim.grandFinalReset} disabled={locked} onChange={(v) => set((c) => void (c.doubleElim.grandFinalReset = v))} />}
         </div>
         {cfg.format === 'swiss' && (
-          <div className="form-grid" style={{ marginTop: 10 }}>
+          <div className="form-grid" style={{ marginTop: 16 }}>
             <Field help={HELP.swissRounds} label="Swiss rounds" hint="Empty = automatic (log2 of entrants)">
               <input type="number" min={1} max={20} value={cfg.swiss.rounds ?? ''} disabled={locked} onChange={(e) => set((c) => void (c.swiss.rounds = num(e.target.value)))} />
             </Field>
@@ -102,7 +103,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
           </div>
         )}
         {cfg.format === 'round_robin' && (
-          <div className="form-grid" style={{ marginTop: 10 }}>
+          <div className="form-grid" style={{ marginTop: 16 }}>
             <Field help={HELP.rrEncounters} label="Times each pair meets">
               <input type="number" min={1} max={4} value={cfg.roundRobin.encounters} disabled={locked} onChange={(e) => set((c) => void (c.roundRobin.encounters = num(e.target.value, 1)!))} />
             </Field>
@@ -117,7 +118,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
       </section>
 
       {six && (
-        <section>
+        <section className="form-section">
           <h3>6mans</h3>
           {cfg.sixmans.roundsMode === 'equal_games' && (() => {
             const players = previewPlayers ?? (playerCount && playerCount >= 6 ? playerCount : cfg.registration.capacity ?? 16);
@@ -187,17 +188,18 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               </div>
             </Field>
           </div>
-          <div style={{ marginTop: 10 }}>
+          <div style={{ marginTop: 16 }}>
             <Check help={HELP.skillBalancedTeams} label="Skill-balanced group teams" checked={cfg.sixmans.skillBalancedTeams} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.skillBalancedTeams = v))} />
             {cfg.sixmans.finalsBracket === 'single_elim' && <Check help={HELP.finalsThirdPlace} label="Finals third-place match" checked={cfg.sixmans.finalsThirdPlace} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.finalsThirdPlace = v))} />}
             {cfg.sixmans.finalsBracket === 'double_elim' && <Check help={HELP.finalsGrandFinalReset} label="Finals grand-final reset" checked={cfg.sixmans.finalsGrandFinalReset} disabled={locked} onChange={(v) => set((c) => void (c.sixmans.finalsGrandFinalReset = v))} />}
           </div>
-          <p className="muted small" style={{ marginTop: 8 }}>Hard rule: the same three players are never teammates twice in a pool. Tie-breakers: points, goal difference, goals for, seed.</p>
+          <p className="muted small" style={{ marginTop: 12 }}>Hard rule: the same three players are never teammates twice in a pool. Tie-breakers: points, goal difference, goals for, seed.</p>
         </section>
       )}
 
-      <section>
-        <h3>Registration & schedule</h3>
+      <section className="form-section">
+        <h3>Schedule & sign-up</h3>
+        <p className="section-desc">When it starts and how players get a spot.</p>
         <div className="form-grid">
           <Field help={HELP.timezone} label="Time zone">
             <select value={tz} onChange={(e) => set((c) => void (c.schedule.timezone = e.target.value))} disabled={locked}>
@@ -246,14 +248,14 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
           </Field>
         </div>
         {voting && <VoteTimes cfg={cfg} set={set} tz={tz} locked={locked} running={startVote?.running ?? []} />}
-        <div className="row" style={{ marginTop: 10, gap: 20 }}>
+        <div className="checks" style={{ marginTop: 16 }}>
           <Check help={HELP.autoStart} label="Auto-start at the start time" checked={cfg.schedule.autoStart} disabled={locked} onChange={(v) => set((c) => void (c.schedule.autoStart = v))} />
           <Check help={HELP.requireApproval} label="Organizer approval required" checked={cfg.registration.requireApproval} disabled={locked} onChange={(v) => set((c) => void (c.registration.requireApproval = v))} />
           <Check help={HELP.waitlist} label="Waitlist when full" checked={cfg.registration.waitlist} disabled={locked} onChange={(v) => set((c) => void (c.registration.waitlist = v))} />
           <Check help={HELP.allowWithdrawal} label="Allow withdrawal" checked={cfg.registration.allowWithdrawal} disabled={locked} onChange={(v) => set((c) => void (c.registration.allowWithdrawal = v))} />
           <Check help={HELP.lateRegistration} label="Late registration" checked={cfg.registration.lateRegistration} disabled={locked} onChange={(v) => set((c) => void (c.registration.lateRegistration = v))} />
         </div>
-        <div className="form-grid" style={{ marginTop: 10 }}>
+        <div className="form-grid" style={{ marginTop: 16 }}>
           <Check help={HELP.checkIn} label="Check-in required" checked={cfg.checkIn.enabled} disabled={locked} onChange={(v) => set((c) => void (c.checkIn.enabled = v))} />
           {cfg.checkIn.enabled && (
             <>
@@ -267,7 +269,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
 
       {sections === 'all' && (
         <>
-          <section>
+          <section className="form-section">
             <h3>Results</h3>
             <div className="form-grid">
               <Field help={HELP.confirmation} label="Confirmation" hint="Default: one team reports, a player on the other team confirms.">
@@ -280,9 +282,9 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               </Field>
             </div>
           </section>
-          <section>
+          <section className="form-section">
             <h3>Score reporting in Discord</h3>
-            <p className="small muted">Each live match gets a card in this channel. The players tap the team that won; once enough matching votes are in, the result is recorded and the next match starts.</p>
+            <p className="section-desc">Each live match gets a card in this channel. The players tap the team that won; once enough matching votes are in, the result is recorded and the next match starts.</p>
             <div className="form-grid">
               <Field help={HELP.scoreChannel} label="Score report channel" hint="Empty = off">
                 {channelPicker(cfg.scoreReports.channelId, textChannels, (v) => set((c) => void (c.scoreReports.channelId = v)), 'Off')}
@@ -291,12 +293,12 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
                 <input type="number" min={1} max={6} value={cfg.scoreReports.votesNeeded} onChange={(e) => set((c) => void (c.scoreReports.votesNeeded = num(e.target.value, 2)!))} />
               </Field>
             </div>
-            <div className="row" style={{ marginTop: 10 }}>
+            <div className="checks" style={{ marginTop: 16 }}>
               <Check help={HELP.requireBothTeams} label="Votes must include a player from each team" checked={cfg.scoreReports.requireBothTeams} onChange={(v) => set((c) => void (c.scoreReports.requireBothTeams = v))} />
               <Check help={HELP.mentionPlayers} label="Ping the players when a card is posted" checked={cfg.scoreReports.mentionPlayers} onChange={(v) => set((c) => void (c.scoreReports.mentionPlayers = v))} />
             </div>
           </section>
-          <section>
+          <section className="form-section">
             <h3>Notifications</h3>
             <div className="form-grid">
               <Field help={HELP.announcementChannel} label="Announcement channel" hint={textChannels.length ? 'Empty = the server default' : 'Channel id (the bot lists channels when it is in the server)'}>
@@ -323,19 +325,19 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               <Field help={HELP.checkInReminders} label="Check-in reminders (min before close)"><input defaultValue={listText(cfg.notifications.checkInReminders)} onBlur={(e) => set((c) => void (c.notifications.checkInReminders = parseList(e.target.value)))} /></Field>
               <Field help={HELP.matchReminders} label="Unreported match reminders (min after ready)"><input defaultValue={listText(cfg.notifications.matchReminders)} onBlur={(e) => set((c) => void (c.notifications.matchReminders = parseList(e.target.value)))} /></Field>
             </div>
-            <div className="row" style={{ marginTop: 10, gap: 20 }}>
+            <div className="checks" style={{ marginTop: 16 }}>
               <Check help={HELP.channelAnnouncements} label="Post announcements in the channel" checked={cfg.notifications.channelAnnouncements} onChange={(v) => set((c) => void (c.notifications.channelAnnouncements = v))} />
               <Check help={HELP.dms} label="Send DMs" checked={cfg.notifications.dms} onChange={(v) => set((c) => void (c.notifications.dms = v))} />
               <Check help={HELP.clearChannelsOnEnd} label="Clear the channels when the tournament ends" checked={cfg.notifications.clearChannelsOnEnd} onChange={(v) => set((c) => void (c.notifications.clearChannelsOnEnd = v))} />
             </div>
             {cfg.notifications.clearChannelsOnEnd && (
-              <div className="form-grid" style={{ marginTop: 10 }}>
+              <div className="form-grid" style={{ marginTop: 16 }}>
                 <Field help={HELP.clearChannelsAfterHours} label="Clear after (hours)" hint="0 = right away">
                   <input type="number" min={0} max={720} value={cfg.notifications.clearChannelsAfterHours} onChange={(e) => set((c) => void (c.notifications.clearChannelsAfterHours = num(e.target.value, 0)!))} />
                 </Field>
               </div>
             )}
-            <details style={{ marginTop: 10 }}>
+            <details style={{ marginTop: 16 }}>
               <summary>Per-event delivery <Help text={HELP.perEvent} /></summary>
               <div className="table-wrap" style={{ marginTop: 8 }}>
                 <table className="table">
@@ -356,14 +358,14 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               </div>
             </details>
           </section>
-          <section>
+          <section className="form-section">
             <h3>Voice channels</h3>
-            <div className="row" style={{ gap: 20 }}>
+            <div className="checks">
               <Check help={HELP.voiceEnabled} label={cfg.teamSize === 1 ? 'Private voice channel per player' : 'Private voice channel per team'} checked={cfg.voice.enabled} onChange={(v) => set((c) => void (c.voice.enabled = v))} />
               <Check help={HELP.moveConnectedPlayers} label="Move connected players automatically" checked={cfg.voice.moveConnectedPlayers} onChange={(v) => set((c) => void (c.voice.moveConnectedPlayers = v))} />
               <Check help={HELP.deleteOnComplete} label="Delete when the match completes" checked={cfg.voice.deleteOnComplete} onChange={(v) => set((c) => void (c.voice.deleteOnComplete = v))} />
             </div>
-            <div className="form-grid" style={{ marginTop: 10 }}>
+            <div className="form-grid" style={{ marginTop: 16 }}>
               <Field help={HELP.lobby} label="Between-games lobby" hint="Players wait here after each game, then get moved to their next match. Empty = off.">
                 {channelPicker(cfg.voice.lobbyChannelId, voiceChannels, (v) => set((c) => void (c.voice.lobbyChannelId = v)), 'Off', '🔊 ')}
               </Field>
@@ -372,7 +374,7 @@ export function ConfigForm({ cfg, onChange, locked = false, sections = 'all', ch
               </Field>
             </div>
             {categories.length > 0 && (
-              <div className="form-grid" style={{ marginTop: 10 }}>
+              <div className="form-grid" style={{ marginTop: 16 }}>
                 <Field help={HELP.voiceCategory} label="Category">
                   <select value={cfg.voice.categoryId ?? ''} onChange={(e) => set((c) => void (c.voice.categoryId = e.target.value || null))}>
                     <option value="">Server default</option>

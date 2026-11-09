@@ -206,6 +206,7 @@ export async function transition(ctx: AppContext, actorId: string | null, id: nu
     if (action === 'resume') enqueue(ctx, { tournamentId: id, category: 'tournament_start', key: `t${id}:resume:${now}`, audience: 'participants', payload: { event: 'resumed' } });
     if (action === 'cancel') {
       ctx.db.prepare("UPDATE start_polls SET status = 'cancelled', closed_at = ?, closed_by = ?, updated_at = ? WHERE tournament_id = ? AND status = 'open'").run(now, actorId, now, id);
+      ctx.db.prepare("UPDATE date_change_votes SET status = 'cancelled', closed_at = ?, closed_by = ?, updated_at = ? WHERE tournament_id = ? AND status = 'open'").run(now, actorId, now, id);
       cancelOpenMatches(ctx, id);
       cancelPending(ctx, { tournamentId: id });
       ctx.db.prepare("UPDATE invitations SET status = 'revoked' WHERE tournament_id = ? AND status = 'pending'").run(id);

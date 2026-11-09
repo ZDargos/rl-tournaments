@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Activity as ActivityIcon, ArrowLeft, Ban, Gauge, Layers, Send, Settings as SettingsIcon, ShieldCheck, Swords, Users } from 'lucide-react';
 import { RANKS, STATE_LABELS, type TransitionAction } from '@rl/core';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
 import { useTournament } from './Tournament';
-import { AVAILABILITY_ORDER, AvailabilityBadge, ConfirmButton, Empty, ErrorBox, Field, Help, MatchBadge, Modal, Spinner, StateBadge, Tabs, useToast } from '../components/ui';
+import { Alert, AVAILABILITY_ORDER, AvailabilityBadge, ConfirmButton, Empty, ErrorBox, Field, Help, MatchBadge, Modal, Spinner, StateBadge, Tabs, useToast, type TabDef } from '../components/ui';
+import { DateVoteAdmin } from '../components/DateVote';
 import { HELP } from '../components/settingHelp';
 import { ConfigForm } from '../components/ConfigForm';
 import { MemberPicker } from '../components/MemberPicker';
@@ -26,33 +28,44 @@ export function ManagePage() {
   if (loading && !d) return <Spinner />;
   if (error && !d) return <ErrorBox error={error} />;
   if (!d) return null;
-  if (!d.viewer.canManage) return <Empty icon="⛔" title="Only organizers can manage this tournament">Ask the tournament creator to add you as an admin.</Empty>;
+  if (!d.viewer.canManage) return <Empty icon={Ban} title="Only organizers can manage this tournament">Ask the tournament creator to add you as an admin.</Empty>;
   const t = d.tournament;
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'control', label: 'Control' }, { id: 'settings', label: 'Settings' }, { id: 'entries', label: `Registrations (${d.entries.length})` },
-    ...(t.format === 'sixmans' ? [{ id: 'sixmans' as Tab, label: '6mans' }] : []),
-    { id: 'matches', label: 'Matches' }, { id: 'people', label: 'Admins & access' }, { id: 'log', label: 'Activity' },
+  const attention = d.matches.filter((m: any) => ['disputed', 'awaiting_confirmation'].includes(m.status)).length;
+  const pending = d.entries.filter((e: any) => e.status === 'pending').length;
+  const tabs: TabDef<Tab>[] = [
+    { id: 'control', label: 'Control panel', icon: Gauge },
+    { id: 'entries', label: 'Registrations', icon: Users, count: pending || d.entries.length },
+    ...(t.format === 'sixmans' ? [{ id: 'sixmans' as Tab, label: '6mans', icon: Layers }] : []),
+    { id: 'matches', label: 'Matches', icon: Swords, ...(attention ? { count: attention } : {}) },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+    { id: 'people', label: 'Admins & access', icon: ShieldCheck },
+    { id: 'log', label: 'Activity', icon: ActivityIcon },
   ];
   return (
     <div>
-      <div className="row between" style={{ marginBottom: 12 }}>
-        <div>
-          <Link to={`/t/${t.id}`}>← Public page</Link>
-          <h1 style={{ marginTop: 6 }}>{t.name}</h1>
-          <div className="row"><StateBadge state={t.state} /><span className="muted small">{t.formatLabel} · {t.teamSize}v{t.teamSize} · {d.guild?.name}</span></div>
-        </div>
+      <div className="page-head">
+        <Link className="crumb" to={`/t/${t.id}`}><ArrowLeft aria-hidden />Public page</Link>
+        <h1>{t.name}</h1>
+        <div className="row"><StateBadge state={t.state} /><span className="muted small">{t.formatLabel}, {t.teamSize}v{t.teamSize}{d.guild?.name ? ` in ${d.guild.name}` : ''}</span></div>
       </div>
-      <Tabs tabs={tabs} value={tab} onChange={setTab} />
-      {tab === 'control' && <Control d={d} reload={reload} openSettings={() => setTab('settings')} />}
-      {tab === 'settings' && <Settings d={d} reload={reload} />}
-      {tab === 'entries' && <Entries d={d} reload={reload} />}
-      {tab === 'sixmans' && <SixmansAdmin d={d} reload={reload} />}
-      {tab === 'matches' && <MatchesAdmin d={d} reload={reload} />}
-      {tab === 'people' && <People d={d} reload={reload} />}
-      {tab === 'log' && <Activity d={d} />}
+      <Tabs tabs={tabs} value={tab} onChange={setTab} orientation="vertical" className="side-layout">
+        {tab === 'control' && <Control d={d} reload={reload} openSettings={() => setTab('settings')} />}
+        {tab === 'settings' && <Settings d={d} reload={reload} />}
+        {tab === 'entries' && <Entries d={d} reload={reload} />}
+        {tab === 'sixmans' && <SixmansAdmin d={d} reload={reload} />}
+        {tab === 'matches' && <MatchesAdmin d={d} reload={reload} />}
+        {tab === 'people' && <People d={d} reload={reload} />}
+        {tab === 'log' && <Activity d={d} />}
+      </Tabs>
     </div>
   );
 }
+
+const NOTIFICATION_NAMES: Record<string, string> = { personal: 'Direct message', organizer_alert: 'Organizer notice', availability_digest: 'Availability summary', tournament_start: 'Start reminder' };
+
+const LIFECYCLE = ['draft', 'published', 'registration_open', 'registration_closed', 'in_progress', 'completed'];
+/** What the organizer most likely wants to do next, so it can be the one big button. */
+const NEXT_ACTION: Record<string, string> = { draft: 'publish', published: 'open_registration', registration_open: 'close_registration', registration_closed: 'start', ready: 'start', paused: 'resume' };
 
 function Control({ d, reload, openSettings }: { d: any; reload: () => void; openSettings: () => void }) {
   const t = d.tournament;
@@ -67,59 +80,69 @@ function Control({ d, reload, openSettings }: { d: any; reload: () => void; open
     }
   };
   const sc = m.startCheck;
+  const actions: TransitionAction[] = m.availableActions.filter((a: string) => a !== 'cancel' && !(['open_registration', 'unpublish'].includes(a) && d.startPoll?.status === 'open'));
+  const next = NEXT_ACTION[t.state];
+  const stage = LIFECYCLE.indexOf(t.state === 'ready' ? 'registration_closed' : t.state === 'paused' ? 'in_progress' : t.state);
+  const actionButton = (a: TransitionAction) =>
+    a === 'start' ? (
+      <ConfirmButton key={a} className={next === 'start' ? 'btn primary' : 'btn blue'} label={ACTION_LABEL[a]} disabled={busy || (sc && !sc.ok)} confirm={`Start now? Brackets/pairings are generated and the format becomes locked.${sc?.warnings.length ? ` Warnings: ${sc.warnings.join(' ')}` : ''}`} onConfirm={() => act(a)} />
+    ) : (
+      <button key={a} className={a === next ? 'btn primary' : a === 'pause' || a === 'unpublish' ? 'btn' : 'btn blue'} disabled={busy} onClick={() => act(a)}>{ACTION_LABEL[a] ?? a}</button>
+    );
   return (
-    <div className="grid cols-2">
-      <div className="stack">
-        <div className="card">
-          <h3>Lifecycle</h3>
-          <p className="muted small">Draft → Published → Registration open → Registration closed → In progress → Completed. Format and structure lock when the tournament starts.</p>
-          <div className="row">
-            {m.availableActions.filter((a: string) => a !== 'cancel' && !(['open_registration', 'unpublish'].includes(a) && d.startPoll?.status === 'open')).map((a: TransitionAction) =>
-              a === 'start' ? (
-                <ConfirmButton key={a} className="btn primary" label={ACTION_LABEL[a]} disabled={busy || (sc && !sc.ok)} confirm={`Start now? Brackets/pairings are generated and the format becomes locked.${sc?.warnings.length ? ` Warnings: ${sc.warnings.join(' ')}` : ''}`} onConfirm={() => act(a)} />
-              ) : (
-                <button key={a} className={a === 'pause' ? 'btn' : 'btn blue'} disabled={busy} onClick={() => act(a)}>{ACTION_LABEL[a] ?? a}</button>
-              ),
-            )}
-            {m.availableActions.includes('cancel') && <ConfirmButton className="btn danger" label="Cancel" reason="optional" confirm="Cancel the tournament? Open matches are cancelled, voice channels removed and participants notified." onConfirm={(r) => act('cancel', r)} />}
-          </div>
-          <ErrorBox error={error} />
-          {t.autoStartError && <div className="alert error" style={{ marginTop: 10 }}>Automatic start failed: {t.autoStartError.split('|').slice(1).join('|')}</div>}
+    <div className="stack">
+      <div className="card">
+        <div className="card-head">
+          <h3>Tournament status</h3>
+          {m.availableActions.includes('cancel') && <ConfirmButton className="btn danger small" label="Cancel tournament" reason="optional" confirm="Cancel the tournament? Open matches are cancelled, voice channels removed and participants notified." onConfirm={(r) => act('cancel', r)} />}
         </div>
-        <StartPollAdmin d={d} reload={reload} openSettings={openSettings} />
+        {t.state === 'cancelled' ? <Alert kind="error">This tournament was cancelled.</Alert> : (
+          <ol className="steps" aria-label="Tournament lifecycle" style={{ listStyle: 'none', padding: 0 }}>
+            {LIFECYCLE.map((s, i) => <li key={s} className={`step ${i < stage ? 'done' : i === stage ? 'current' : ''}`} aria-current={i === stage ? 'step' : undefined}>{STATE_LABELS[s as 'draft']}</li>)}
+          </ol>
+        )}
+        <div className="row">{actions.map(actionButton)}</div>
+        <p className="muted small" style={{ marginTop: 12, marginBottom: 0 }}>The format and structure lock when the tournament starts.{t.state === 'paused' ? ' The tournament is paused: players cannot report results until you resume it.' : ''}</p>
+        <ErrorBox error={error} />
+        {t.autoStartError && <Alert kind="error" className="mt-3">Automatic start failed: {t.autoStartError.split('|').slice(1).join('|')}</Alert>}
         {sc && (
-          <div className="card">
-            <h3>Start checklist</h3>
-            {sc.ok ? <div className="alert ok">Ready to start with {sc.entrants} {t.format === 'sixmans' ? 'players' : 'entrants'}.</div> : <div className="alert error"><strong>Cannot start yet:</strong><ul>{sc.problems.map((p: string) => <li key={p}>{p}</li>)}</ul></div>}
-            {sc.warnings.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}><ul>{sc.warnings.map((p: string) => <li key={p}>{p}</li>)}</ul></div>}
+          <div className="stack tight" style={{ marginTop: 14 }}>
+            {sc.ok ? <Alert kind="ok">Ready to start with {sc.entrants} {t.format === 'sixmans' ? 'players' : 'entrants'}.</Alert> : <Alert kind="warn"><strong>Before you can start:</strong><ul>{sc.problems.map((p: string) => <li key={p}>{p}</li>)}</ul></Alert>}
+            {sc.warnings.length > 0 && <Alert kind="warn"><ul style={{ marginTop: 0 }}>{sc.warnings.map((p: string) => <li key={p}>{p}</li>)}</ul></Alert>}
           </div>
         )}
       </div>
-      <div className="stack">
-        {m.unreachable.length > 0 && (
-          <div className="card">
-            <h3>⚠️ Players who won’t get notifications</h3>
-            <ul className="small">{m.unreachable.map((u: any) => <li key={u.userId}><strong>{u.name}</strong>: {u.reason}</li>)}</ul>
-          </div>
-        )}
-        <div className="card">
-          <div className="card-head">
-            <h3>Voice channels</h3>
-            <button className="btn small" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/voice/repair`, { body: {} }))) { toast('Voice channels reconciled'); reload(); } }}>Repair</button>
-          </div>
-          {!t.config.voice.enabled ? <p className="muted small">Disabled for this tournament.</p> : m.voice.length === 0 ? <p className="muted small">No match channels right now. They are created when a match becomes ready and deleted when it completes.</p> : (
-            <div className="table-wrap"><table className="table"><tbody>
-              {m.voice.map((v: any) => <tr key={v.id}><td>#{v.matchId}{v.slot.toUpperCase()}</td><td className="mono small">{v.name}</td><td><span className={`badge ${v.status === 'active' ? 'green' : v.status === 'failed' ? 'red' : ''}`}>{v.status}</span></td><td className="small muted">{v.error}</td></tr>)}
-            </tbody></table></div>
-          )}
+      <div className="grid cols-2">
+        <div className="stack">
+          <DateVoteAdmin d={d} reload={reload} />
+          <StartPollAdmin d={d} reload={reload} openSettings={openSettings} />
         </div>
-        <div className="card">
-          <h3>Recent notifications</h3>
-          {m.notifications.length === 0 ? <p className="muted small">None yet.</p> : (
-            <div className="table-wrap"><table className="table"><tbody>
-              {m.notifications.slice(0, 15).map((n: any) => <tr key={n.id}><td className="small">{n.category.replace(/_/g, ' ')}</td><td className="small muted">{fmtDate(n.runAt)}</td><td><span className={`badge ${n.status === 'sent' ? 'green' : n.status === 'failed' ? 'red' : n.status === 'pending' ? 'blue' : ''}`}>{n.status}</span></td><td className="tiny muted">{n.lastError}</td></tr>)}
-            </tbody></table></div>
+        <div className="stack">
+          {m.unreachable.length > 0 && (
+            <div className="card accent-yellow">
+              <h3>Players who won’t get notifications</h3>
+              <ul className="small stack tight" style={{ paddingLeft: 18, listStyle: 'disc', margin: 0 }}>{m.unreachable.map((u: any) => <li key={u.userId}><strong>{u.name}</strong>: {u.reason}</li>)}</ul>
+            </div>
           )}
+          <div className="card">
+            <div className="card-head">
+              <h3>Voice channels</h3>
+              <button className="btn small" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/voice/repair`, { body: {} }))) { toast('Voice channels reconciled'); reload(); } }}>Repair</button>
+            </div>
+            {!t.config.voice.enabled ? <p className="muted small">Turned off for this tournament.</p> : m.voice.length === 0 ? <p className="muted small">No match channels right now. They are created when a match becomes ready and deleted when it completes.</p> : (
+              <div className="table-wrap"><table className="table"><tbody>
+                {m.voice.map((v: any) => <tr key={v.id}><td>#{v.matchId}{v.slot.toUpperCase()}</td><td className="small">{v.name}</td><td><span className={`badge ${v.status === 'active' ? 'green' : v.status === 'failed' ? 'red' : ''}`}>{v.status}</span></td><td className="small muted">{v.error}</td></tr>)}
+              </tbody></table></div>
+            )}
+          </div>
+          <div className="card">
+            <h3>Recent notifications</h3>
+            {m.notifications.length === 0 ? <p className="muted small">None yet.</p> : (
+              <div className="table-wrap"><table className="table"><tbody>
+                {m.notifications.slice(0, 15).map((n: any) => <tr key={n.id}><td className="small">{NOTIFICATION_NAMES[n.category] ?? n.category.replace(/_/g, ' ')}</td><td className="small muted" style={{ whiteSpace: 'nowrap' }}>{fmtDate(n.runAt ?? n.run_at)}</td><td><span className={`badge ${n.status === 'sent' ? 'green' : n.status === 'failed' ? 'red' : n.status === 'pending' ? 'blue' : ''}`}>{n.status}</span></td><td className="tiny muted">{n.lastError ?? n.last_error}</td></tr>)}
+              </tbody></table></div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -148,6 +171,7 @@ function Settings({ d, reload }: { d: any; reload: () => void }) {
   return (
     <div className="stack">
       <div className="card">
+        <h3>Basics</h3>
         <div className="form-grid">
           <Field help={HELP.name} label="Name"><input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} /></Field>
           <Field help={HELP.visibility} label="Visibility"><select value={visibility} onChange={(e) => setVisibility(e.target.value)}><option value="public">Public</option><option value="private">Private</option></select></Field>
@@ -156,8 +180,8 @@ function Settings({ d, reload }: { d: any; reload: () => void }) {
       </div>
       <div className="card"><ConfigForm cfg={cfg} onChange={setCfg} locked={locked} channels={channels} playerCount={d.entries.filter((e: any) => e.status === 'confirmed').length} startVote={{ allowed: ['draft', 'published'].includes(t.state), running: d.startPoll?.status === 'open' ? d.startPoll.options.map((o: any) => o.at) : [] }} /></div>
       <ErrorBox error={error} />
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={busy} onClick={async () => {
+      <div className="row end" style={{ position: 'sticky', bottom: 12, zIndex: 5 }}>
+        <button className="btn primary large" style={{ boxShadow: '0 10px 30px -8px rgb(0 0 0 / 0.8)' }} disabled={busy} onClick={async () => {
           if (await run(() => api(`/api/tournaments/${t.id}`, { method: 'PATCH', body: { name, description, visibility, configPatch: cfg, expectedVersion: t.version } }))) { toast('Settings saved'); reload(); }
         }}>Save settings</button>
       </div>
@@ -241,7 +265,7 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
           <h3>Registrations</h3>
           <div className="row">
             {canRemind && signedUp.length > 0 && (
-              <ConfirmButton className="btn small primary" label="📨 Send availability check to all" confirm="DM every registered player the start reminder now, with the “Can you still make it?” buttons? Players who turned off bot DMs or muted this tournament are skipped." onConfirm={() => remind(null)} />
+              <ConfirmButton className="btn small primary" label={<><Send aria-hidden />Ask everyone if they can make it</>} confirm="DM every registered player the start reminder now, with the “Can you still make it?” buttons? Players who turned off bot DMs or muted this tournament are skipped." onConfirm={() => remind(null)} />
             )}
             {t.config.registrationMode === 'team' && t.teamSize > 1 && !started && (
               <>
@@ -253,11 +277,11 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
         </div>
         {signedUp.length > 0 && !started && (
           <div className="row small" style={{ marginBottom: 10, gap: 8 }}>
-            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. You can send that reminder now with the buttons here (to everyone, or 📨 Send next to a player). Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
+            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. You can send that reminder now with the buttons here (to everyone, or Ask next to a player). Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
             {availCounts.map(([s, n]) => <span key={s} className="row" style={{ gap: 4 }}><AvailabilityBadge status={s} /> {n}</span>)}
           </div>
         )}
-        {entries.length === 0 ? <Empty icon="👥" title="No registrations yet" /> : (
+        {entries.length === 0 ? <Empty icon={Users} title="No registrations yet">Share the tournament link, or add players above.</Empty> : (
           <div className="table-wrap">
             <table className="table">
               <thead><tr><th>Name</th><th>Status</th><th>Can make it?</th>{t.config.checkIn.enabled && <th>Check-in</th>}<th>{six && t.config.sixmans.skillMethod === 'rank' ? 'Rank' : 'Seed'}</th><th /></tr></thead>
@@ -265,7 +289,7 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
                 {entries.map((e: any) => (
                   <tr key={e.id}>
                     <td><strong>{e.name}</strong>{e.kind === 'team' && <div className="tiny muted">{e.members.map((m: any) => `${m.name}${m.role === 'captain' ? ' (C)' : m.role === 'substitute' ? ' (sub)' : ''}`).join(', ')}</div>}</td>
-                    <td><span className="badge">{e.status}</span></td>
+                    <td><span className={`badge ${e.status === 'confirmed' ? 'green' : e.status === 'pending' ? 'blue' : e.status === 'waitlisted' ? 'yellow' : ''}`}>{e.status}</span></td>
                     <td>
                       {!['pending', 'confirmed', 'waitlisted'].includes(e.status) ? '—' : (
                         <div className="stack" style={{ gap: 4 }}>
@@ -281,14 +305,14 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
                                 </select>
                               )}
                               {canRemind && (
-                                <button className="btn small ghost" disabled={busy} title="DM the start reminder with the “Can you still make it?” buttons" onClick={() => void remind(m.userId, m.name ?? e.name)}>📨 Send</button>
+                                <button className="btn small ghost" disabled={busy} title="DM the start reminder with the “Can you still make it?” buttons" onClick={() => void remind(m.userId, m.name ?? e.name)}><Send aria-hidden />Ask</button>
                               )}
                             </div>
                           ))}
                         </div>
                       )}
                     </td>
-                    {t.config.checkIn.enabled && <td>{e.checkedIn ? '✅' : e.status === 'confirmed' && !started ? <button className="btn small ghost" disabled={busy} onClick={() => act(() => api(`/api/tournaments/${t.id}/check-in`, { body: { entryId: e.id } }), 'Checked in')}>Check in</button> : '—'}</td>}
+                    {t.config.checkIn.enabled && <td>{e.checkedIn ? <span className="badge green">checked in</span> : e.status === 'confirmed' && !started ? <button className="btn small ghost" disabled={busy} onClick={() => act(() => api(`/api/tournaments/${t.id}/check-in`, { body: { entryId: e.id } }), 'Checked in')}>Check in</button> : '—'}</td>}
                     <td>
                       {six && t.config.sixmans.skillMethod === 'rank' ? (
                         <select disabled={started} value={e.rank ?? ''} onChange={(ev) => act(() => api(`/api/entries/${e.id}`, { method: 'PATCH', body: { rank: ev.target.value || null } }))} style={{ minWidth: 150 }}>
@@ -345,8 +369,8 @@ function MatchesAdmin({ d, reload }: { d: any; reload: () => void }) {
   return (
     <div className="stack">
       {attention.length > 0 && (
-        <div className="card" style={{ borderColor: 'var(--yellow)' }}>
-          <h3>Needs attention</h3>
+        <div className="card accent-yellow">
+          <h3>Needs your attention</h3>
           {attention.map((m: any) => <div key={m.id} className="row" style={{ marginBottom: 6 }}><MatchBadge status={m.status} /><Link to={`/m/${m.id}`}>#{m.id} {m.label}: {m.a?.name} vs {m.b?.name}</Link></div>)}
         </div>
       )}
@@ -431,7 +455,7 @@ function Activity({ d }: { d: any }) {
       <p className="muted small">Every organizer action, result report, confirmation, dispute and correction. Entries cannot be edited or deleted.</p>
       <div className="table-wrap"><table className="table"><tbody>
         {rows.map((r) => (
-          <tr key={r.id}><td className="small muted" style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.createdAt)}</td><td className="small">{r.actorName}</td><td><span className="badge">{r.action}</span></td><td className="tiny muted mono" style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.target} {JSON.stringify(r.details)}</td></tr>
+          <tr key={r.id}><td className="small muted" style={{ whiteSpace: 'nowrap' }}>{fmtDate(r.createdAt)}</td><td className="small">{r.actorName}</td><td><span className="badge">{r.action}</span></td><td className="tiny muted" style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', fontFamily: 'ui-monospace, monospace' }}>{r.target} {JSON.stringify(r.details)}</td></tr>
         ))}
       </tbody></table></div>
     </div>

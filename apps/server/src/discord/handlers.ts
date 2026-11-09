@@ -20,6 +20,7 @@ import { zonedToUtc } from '../lib/tz.js';
 import { SETTING_SUGGESTIONS } from './commands.js';
 import { setAvailability } from '../services/availability.js';
 import { pollSignup, togglePollVote } from '../services/polls.js';
+import { answerDateVote } from '../services/dateVotes.js';
 
 /** Platform-neutral view of a Discord interaction (built by bot.ts from discord.js objects). */
 export interface BotInteraction {
@@ -625,6 +626,12 @@ async function handleButton(ctx: AppContext, i: BotInteraction): Promise<BotRepl
     const r = await togglePollVote(ctx, i.user.id, Number(a), Number(b), src);
     const picks = r.picks.map((o) => discordTime(r.options[o], 'F'));
     return reply(picks.length ? `🗳️ Your picks: ${picks.join(' · ')}. If one of them wins, you're registered automatically. Tap a time again to remove it.` : '🗳️ You have no picks now. Tap every time that works for you.');
+  }
+  if (kind === 'dcv') {
+    const r = await answerDateVote(ctx, i.user.id, Number(a), b === 'no' ? 'no' : 'yes', src);
+    return reply(r.answer === 'yes'
+      ? `✅ Thanks! The organizers of **${esc(r.tournament.name)}** know you can make ${discordTime(r.proposedAt, 'F')}. Tap the other button to change your answer.`
+      : `Got it, the organizers of **${esc(r.tournament.name)}** know you can't make ${discordTime(r.proposedAt, 'F')}. Tap the other button to change your answer.`);
   }
   if (kind === 'pollreg') {
     const e = await pollSignup(ctx, i.user.id, Number(a), src);

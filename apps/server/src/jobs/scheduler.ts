@@ -8,6 +8,7 @@ import { reconcileAll, reconcileLobbies } from '../services/voice.js';
 import { syncAllScoreCards } from '../services/scorecards.js';
 import { clearEndedChannels } from '../services/channels.js';
 import { closeDuePolls, syncAllPollCards } from '../services/polls.js';
+import { cancelStaleDateVotes, syncAllDateVoteCards } from '../services/dateVotes.js';
 import { cleanupAuth } from '../auth/sessions.js';
 import { loadTournament } from '../services/access.js';
 import { transition } from '../services/tournaments.js';
@@ -56,6 +57,7 @@ export class JobRunner {
     try {
       this.ticks++;
       await closeDuePolls(ctx);
+      cancelStaleDateVotes(ctx);
       await this.registrationWindows();
       await this.autoStarts();
       autoConfirmDue(ctx);
@@ -68,6 +70,7 @@ export class JobRunner {
       else await reconcileLobbies(ctx);
       await syncAllScoreCards(ctx);
       await syncAllPollCards(ctx);
+      await syncAllDateVoteCards(ctx);
       await clearEndedChannels(ctx);
       if (this.ticks % 240 === 0) cleanupAuth(ctx);
       await this.maybeBackup();

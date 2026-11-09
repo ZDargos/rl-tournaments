@@ -8,6 +8,7 @@ import { dispatchDue } from './services/notifications.js';
 import { reconcileTournament } from './services/voice.js';
 import { syncScoreCards } from './services/scorecards.js';
 import { syncPollCards } from './services/polls.js';
+import { syncDateVoteCards } from './services/dateVotes.js';
 
 export function createContext(deps: { env: Env; db: DB; discord: DiscordPort; log: Logger; clock?: Clock }): AppContext {
   let chain: Promise<void> = Promise.resolve();
@@ -22,6 +23,7 @@ export function createContext(deps: { env: Env; db: DB; discord: DiscordPort; lo
             await reconcileTournament(ctx, tournamentId);
             await syncScoreCards(ctx, tournamentId);
             await syncPollCards(ctx, tournamentId);
+            await syncDateVoteCards(ctx, tournamentId);
           }
           await dispatchDue(ctx);
         })

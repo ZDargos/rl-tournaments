@@ -8,6 +8,7 @@ import { oauthConfigured } from '../env.js';
 import { authorizeUrl, handleCallback, OAUTH_SCOPES, type FetchLike } from '../auth/oauth.js';
 import { sendAvailabilityCheck, setAvailability } from '../services/availability.js';
 import { cancelPoll, closePollNow, createPoll, setPollVotes } from '../services/polls.js';
+import { answerTournamentDateVote, closeDateVote, createDateVote, DATE_VOTE_REASON_MAX } from '../services/dateVotes.js';
 import { createSession, destroySession, redeemLoginCode, resolveSession } from '../auth/sessions.js';
 import type { UserRow } from '../services/users.js';
 import { ensureUser, listMutes, publicUser, setMute, setPreferences, upsertUser } from '../services/users.js';
@@ -369,6 +370,19 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     const b = z.object({ options: z.array(z.number().int().min(0).max(MAX_START_VOTE_OPTIONS - 1)).max(MAX_START_VOTE_OPTIONS) }).parse(req.body);
     const r = await setPollVotes(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.options, src);
     return { picks: r.picks };
+  });
+  app.post('/api/tournaments/:id/date-vote', async (req) => {
+    const b = z.object({ proposedAt: z.string().max(40), reason: z.string().max(DATE_VOTE_REASON_MAX) }).parse(req.body);
+    return createDateVote(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b, src);
+  });
+  app.post('/api/tournaments/:id/date-vote/answer', async (req) => {
+    const b = z.object({ answer: z.enum(['yes', 'no']) }).parse(req.body);
+    const r = await answerTournamentDateVote(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.answer, src);
+    return { answer: r.answer, counts: r.counts };
+  });
+  app.post('/api/tournaments/:id/date-vote/close', async (req) => {
+    const b = z.object({ decision: z.enum(['move', 'keep']) }).parse(req.body);
+    return closeDateVote(ctx, requireUser(req).id, id.parse((req.params as { id: string }).id), b.decision, src);
   });
   app.post('/api/tournaments/:id/availability-check', async (req) => {
     const b = z.object({ userId: snowflake.nullish() }).parse(req.body ?? {});

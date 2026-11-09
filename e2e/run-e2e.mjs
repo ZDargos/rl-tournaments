@@ -132,6 +132,24 @@ async function main() {
   const forbidden = await fetch(`${API}/api/tournaments/${tid}/actions/start`, { method: 'POST', headers: { authorization: `Bearer ${await players[0].evaluate(() => localStorage.getItem('rlt.session'))}`, 'content-type': 'application/json' }, body: '{}' });
   check(forbidden.status === 403, `API refuses start by a player (HTTP ${forbidden.status})`);
 
+  step('organizer asks players about a new date; a player answers on the website');
+  await org.reload();
+  await org.getByLabel(/New date and time/).fill('2030-06-01T20:00');
+  await org.getByLabel('Why do you want to change it?').fill('RLCS finals clash with the original date');
+  await org.getByRole('button', { name: /Send to 4 players/ }).click();
+  await org.getByText('Players are answering').waitFor();
+  await players[1].goto(`${WEB}/#/t/${tid}`);
+  await players[1].getByRole('button', { name: 'Yes, I can make it' }).click();
+  await players[1].getByText('You answered').waitFor();
+  let dv = (await apiAs(org, `/api/tournaments/${tid}`)).dateVote;
+  check(dv.status === 'open' && dv.counts.yes === 1 && dv.counts.waiting === 3 && dv.reason.startsWith('RLCS'), `date change vote sent to 4 players, 1 yes so far (${JSON.stringify(dv.counts)})`);
+  await org.reload();
+  await org.getByText('Can make it (1)').waitFor();
+  await org.getByRole('button', { name: 'Keep the current date' }).click();
+  await org.getByRole('button', { name: 'Confirm', exact: true }).click();
+  for (let i = 0; i < 40 && dv.status === 'open'; i++) { await new Promise((r) => setTimeout(r, 250)); dv = (await apiAs(org, `/api/tournaments/${tid}`)).dateVote; }
+  check(dv.status === 'kept', `organizer kept the date in the UI (status: ${dv.status})`);
+
   step('organizer starts the tournament');
   await org.reload();
   if (await org.getByRole('button', { name: 'Close registration' }).isVisible()) {
