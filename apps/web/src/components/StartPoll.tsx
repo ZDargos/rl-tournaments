@@ -144,7 +144,7 @@ export function StartPollVote({ d, reload }: { d: any; reload: () => void }) {
       <p className="muted small">Tick every time that works for you. Voting closes {fmtDate(p.closesAt)} ({relTime(p.closesAt)}). If a time you picked wins, you’re registered automatically.</p>
       <div className="stack" style={{ gap: 6 }}>
         {p.options.map((o: any) => (
-          <label key={o.index} className="row" style={{ gap: 10, flexWrap: 'nowrap', cursor: me ? 'pointer' : 'default', padding: '8px 10px', borderRadius: 9, border: '1px solid var(--line)', background: o.mine ? 'rgb(59 139 255 / 0.1)' : 'var(--color-pitch)' }}>
+          <label key={o.index} className="row" style={{ gap: 10, flexWrap: 'nowrap', cursor: me ? 'pointer' : 'default', padding: '8px 10px', borderRadius: 'var(--radius-control)', border: '1px solid var(--line)', background: o.mine ? 'rgb(59 139 255 / 0.1)' : 'var(--color-pitch)' }}>
             <input type="checkbox" checked={o.mine} disabled={!me || busy} onChange={() => void toggle(o.index)} />
             <span style={{ flex: 1 }}>{fmtDate(o.at)}</span>
             <span className="muted small">{o.votes} vote{o.votes === 1 ? '' : 's'}</span>

@@ -6,7 +6,7 @@ import { RANKS } from '@rl/core';
 import { api, downloadCsv } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync, useLive } from '../lib/hooks';
-import { Alert, AvailabilityBadge, Empty, ErrorBox, Field, MatchBadge, Spinner, StateBadge, Tabs, useToast, ConfirmButton, type TabDef } from '../components/ui';
+import { Alert, AvailabilityBadge, Empty, ErrorBox, Field, MatchBadge, Spinner, StateBadge, Tabs, useToast, ConfirmButton, type TabDef, DiscordMark } from '../components/ui';
 import { DateVoteAnswer } from '../components/DateVote';
 import { BracketView, MatchCard, MatchList, RoundsView } from '../components/matches';
 import { SixmansStandings, StandingsTable } from '../components/standings';
@@ -148,7 +148,7 @@ function Overview({ d, reload }: { d: any; reload: () => void }) {
             <h2 className="section-title"><Trophy aria-hidden />Final results</h2>
             <table className="table"><tbody>
               {d.placements.slice(0, 8).map((p: any) => (
-                <tr key={p.competitorId}><td style={{ width: 50 }} className="display"><strong style={{ fontSize: '1.2rem' }}>{['🥇', '🥈', '🥉'][p.placement - 1] ?? p.placement}</strong></td><td style={{ fontWeight: 650 }}>{p.name}</td><td className="muted small">{p.players.length > 1 || p.players[0]?.name !== p.name ? p.players.map((x: any) => x.name).join(', ') : ''}</td></tr>
+                <tr key={p.competitorId}><td style={{ width: 50 }} className="display"><strong style={{ fontSize: '1.2rem' }}>{['🥇', '🥈', '🥉'][p.placement - 1] ?? p.placement}</strong></td><td style={{ fontWeight: 500 }}>{p.name}</td><td className="muted small">{p.players.length > 1 || p.players[0]?.name !== p.name ? p.players.map((x: any) => x.name).join(', ') : ''}</td></tr>
               ))}
             </tbody></table>
           </div>
@@ -205,7 +205,7 @@ function RegistrationPanel({ d, reload }: { d: any; reload: () => void }) {
         {d.entries.filter((e: any) => e.status === 'confirmed').length}{t.capacity ? ` / ${t.capacity}` : ''} {teamMode ? 'teams' : 'players'} confirmed
         {d.entries.some((e: any) => e.status === 'waitlisted') && ` · ${d.entries.filter((e: any) => e.status === 'waitlisted').length} on the waitlist`}
       </p>
-      {!me && <Link className="btn discord block" to={`/login?returnTo=/t/${t.id}`}>Log in to register</Link>}
+      {!me && <Link className="btn discord block" to={`/login?returnTo=/t/${t.id}`}><DiscordMark />Log in to register</Link>}
       {me && !myEntry && open && (
         <form className="stack" onSubmit={(e) => { e.preventDefault(); void act(() => api(`/api/tournaments/${t.id}/register`, { body: { teamName: teamMode ? teamName : null, rank: rank || null } }), 'Registered!'); }}>
           {teamMode && <Field label="Team name" hint="You become the captain and can invite teammates."><input required minLength={2} maxLength={40} value={teamName} onChange={(e) => setTeamName(e.target.value)} /></Field>}
@@ -333,7 +333,7 @@ function Participants({ d }: { d: any }) {
                   {es.map((e: any, i: number) => (
                     <tr key={e.id} className={e.id === d.viewer.entryId ? 'highlight' : ''}>
                       <td>{i + 1}</td>
-                      <td style={{ fontWeight: 650 }}>{e.kind === 'player' ? <Link to={`/p/${e.userId}`}>{e.name}</Link> : e.name}</td>
+                      <td style={{ fontWeight: 500 }}>{e.kind === 'player' ? <Link to={`/p/${e.userId}`}>{e.name}</Link> : e.name}</td>
                       <td className="small">{e.kind === 'team' ? e.members.map((m: any) => `${m.name}${m.role === 'substitute' ? ' (sub)' : ''}`).join(', ') : '—'}</td>
                       <td>{d.tournament.config.checkIn.enabled ? (e.checkedIn ? <span className="badge green">checked in</span> : <span className="faint">not yet</span>) : <span className="faint">not needed</span>}</td>
                       {d.viewer.canManage && !d.tournament.startedAt && (
@@ -398,7 +398,7 @@ function PoolsTab({ d }: { d: any }) {
 export function SixmansMatch({ m, me }: { m: any; me?: string | null }) {
   const side = (s: any, cls: string) => (
     <div>
-      {s?.players.map((p: any) => <div key={p.userId} className={`${cls} small`} style={{ fontWeight: p.userId === me ? 800 : 500 }}>{p.name}</div>) ?? <span className="tbd">TBD</span>}
+      {s?.players.map((p: any) => <div key={p.userId} className={`${cls} small`} style={{ fontWeight: p.userId === me ? 600 : 400 }}>{p.name}</div>) ?? <span className="tbd">TBD</span>}
     </div>
   );
   return (

@@ -30,7 +30,7 @@ function Proposal({ v }: { v: any }) {
     <div className="stack tight">
       <div>
         <div className="muted small">New time</div>
-        <div className="display" style={{ fontSize: '1.6rem', fontWeight: 800, lineHeight: 1.1 }}>{fmtDate(v.proposedAt)}</div>
+        <div className="display" style={{ fontSize: '1.6rem', fontWeight: 500, lineHeight: 1.1 }}>{fmtDate(v.proposedAt)}</div>
         <div className="muted small">{v.previousAt ? <>Currently <s>{fmtDate(v.previousAt)}</s></> : 'No start time was set before.'}</div>
       </div>
       <blockquote className="small" style={{ margin: 0, padding: '8px 12px', borderLeft: '3px solid var(--line)', background: 'var(--color-pitch)', borderRadius: '0 8px 8px 0', whiteSpace: 'pre-wrap' }}>{v.reason}</blockquote>

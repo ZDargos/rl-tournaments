@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { CalendarDays, Lock, Plus, Search, Server, Swords, Trophy, Users } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { Empty, ErrorBox, Segmented, Spinner, StateBadge } from '../components/ui';
+import { Empty, ErrorBox, Segmented, Spinner, StateBadge, DiscordMark } from '../components/ui';
 import { fmtDate, relTime } from '../lib/format';
 
 export function TournamentCard({ t }: { t: any }) {
@@ -67,15 +67,32 @@ export function HomePage() {
 
   return (
     <div>
-      <section className="pb-6 pt-2">
-        <h1 style={{ fontSize: 'clamp(2.2rem, 5.5vw, 3.6rem)', maxWidth: 820, lineHeight: 1 }}>Kickoff is in your Discord.</h1>
-        <p className="muted" style={{ maxWidth: 620, fontSize: '1.05rem' }}>
-          Sign up for brackets, Swiss, round robin and 6mans, report your scores and follow every match, here or with the bot.
-        </p>
-        <div className="row">
-          {me ? <Link className="btn primary large" to="/create"><Plus aria-hidden />Create a tournament</Link> : <Link className="btn discord large" to="/login">Log in with Discord</Link>}
-          {meta?.botInviteUrl && <a className="btn large" href={meta.botInviteUrl} target="_blank" rel="noreferrer"><Server aria-hidden />Add the bot to your server</a>}
+      <section className="home-hero">
+        <div>
+          <h1><span className="rise-mask"><span>Kickoff is in your Discord.</span></span></h1>
+          <p className="lead enter-up d1">
+            Sign up for brackets, Swiss, round robin and 6mans, report your scores and follow every match, here or with the bot.
+          </p>
+          <div className="row enter-up d2">
+            {me ? <Link className="btn primary large" to="/create"><Plus aria-hidden />Create a tournament</Link> : <Link className="btn discord large" to="/login"><DiscordMark />Log in with Discord</Link>}
+            {meta?.botInviteUrl && <a className="btn large" href={meta.botInviteUrl} target="_blank" rel="noreferrer"><Server aria-hidden />Add the bot to your server</a>}
+          </div>
         </div>
+        {/* A still, top-down drawing of the pitch: blue goal left, orange goal right. Decorative. */}
+        <svg className="pitch" viewBox="-12 0 544 340" aria-hidden focusable="false">
+          <path className="field" d="M70 10 H450 L510 70 V270 L450 330 H70 L10 270 V70 Z" />
+          <line className="mark" x1="260" y1="10" x2="260" y2="330" />
+          <circle className="mark" cx="260" cy="170" r="52" />
+          <path className="mark" d="M10 110 H70 V230 H10" />
+          <path className="mark" d="M510 110 H450 V230 H510" />
+          <rect className="goal-a" x="-4" y="138" width="22" height="64" rx="3" />
+          <rect className="goal-b" x="502" y="138" width="22" height="64" rx="3" />
+          {[[60, 40], [460, 40], [60, 300], [460, 300], [260, 30], [260, 310], [150, 170], [370, 170]].map(([x, y]) => <circle key={`${x}-${y}`} className="pad" cx={x} cy={y} r="6" />)}
+          {/* Kickoff spots: three cars a side, facing the ball. */}
+          {[[120, 80, 33], [120, 260, -33], [190, 170, 0]].map(([x, y, r]) => <rect key={`a${y}`} className="car-a" x={x - 11} y={y - 6} width="22" height="12" rx="3" transform={`rotate(${r} ${x} ${y})`} />)}
+          {[[400, 80, -33], [400, 260, 33], [330, 170, 0]].map(([x, y, r]) => <rect key={`b${y}`} className="car-b" x={x - 11} y={y - 6} width="22" height="12" rx="3" transform={`rotate(${r} ${x} ${y})`} />)}
+          <circle className="ball" cx="260" cy="170" r="9" />
+        </svg>
       </section>
 
       {me && guilds.length > 0 && (
@@ -85,7 +102,7 @@ export function HomePage() {
         </div>
       )}
 
-      <h2 style={{ marginTop: 8 }}>Tournaments</h2>
+      <div className="section-head"><h2>Tournaments</h2></div>
       <div style={{ marginBottom: 18 }}>
         <div className="row">
           <div className="relative" style={{ width: 'min(260px, 100%)' }}>

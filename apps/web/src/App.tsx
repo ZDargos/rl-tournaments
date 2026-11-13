@@ -4,7 +4,7 @@ import { Dialog, DropdownMenu } from 'radix-ui';
 import { Compass, LogOut, Menu, Plus, Settings2, Trophy, User, Users, X } from 'lucide-react';
 import { API_MISSING } from './lib/api';
 import { useAuth } from './lib/auth';
-import { Alert, Avatar } from './components/ui';
+import { Alert, Avatar, DiscordMark } from './components/ui';
 import { HomePage } from './pages/Home';
 import { AuthCompletePage, LoginPage } from './pages/Auth';
 import { TournamentPage } from './pages/Tournament';
@@ -56,19 +56,19 @@ export function App() {
         <div className="container">
           <Link to="/" className="brand">
             <span className="brand-mark" aria-hidden><span /><span /></span>
-            <span>RL Tournaments</span>
+            <span className="brand-name">RL Tournaments</span>
           </Link>
           <nav className="nav" aria-label="Main">{links}</nav>
           <div className="right row" style={{ flexWrap: 'nowrap', gap: 8 }}>
             {me && <Link className="btn primary small hide-sm" to="/create"><Plus aria-hidden />Create</Link>}
-            {me ? <UserMenu /> : !loading && <Link className="btn discord small" to={`/login?returnTo=${encodeURIComponent(loc.pathname)}`}>Log in with Discord</Link>}
+            {me ? <UserMenu /> : !loading && <Link className="btn discord small" to={`/login?returnTo=${encodeURIComponent(loc.pathname)}`}><DiscordMark />Log in with Discord</Link>}
             <Dialog.Root open={menu} onOpenChange={setMenu}>
               <Dialog.Trigger className="btn ghost small icon-btn show-sm" aria-label="Menu"><Menu /></Dialog.Trigger>
               <Dialog.Portal>
                 <Dialog.Overlay className="sheet-overlay" />
                 <Dialog.Content className="sheet" onClick={(e) => { if ((e.target as HTMLElement).closest('a')) setMenu(false); }}>
                   <div className="row between" style={{ marginBottom: 10 }}>
-                    <Dialog.Title className="display" style={{ fontSize: '1.3rem', fontWeight: 800, margin: 0 }}>Menu</Dialog.Title>
+                    <Dialog.Title className="display" style={{ fontSize: '1.3rem', fontWeight: 500, margin: 0 }}>Menu</Dialog.Title>
                     <Dialog.Close className="btn ghost small icon-btn" aria-label="Close menu"><X /></Dialog.Close>
                   </div>
                   <Dialog.Description className="sr-only">Site navigation</Dialog.Description>

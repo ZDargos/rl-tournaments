@@ -10,7 +10,7 @@ This is the brief the website was redesigned from, plus the tools it is built wi
 | [shadcn/ui](https://github.com/shadcn-ui/ui) approach on [Radix UI](https://github.com/radix-ui/primitives) (`radix-ui`) | shadcn/ui is the most popular React component approach today: you own the component code instead of depending on a styled library. Our primitives live in `apps/web/src/components/ui.tsx` (Tabs, Modal, DropdownMenu, Segmented, Alert…) on top of Radix, which handles keyboard navigation, focus trapping and screen readers. |
 | [lucide-react](https://github.com/lucide-icons/lucide) | The icon set shadcn/ui uses: consistent, tree-shaken, one stroke weight. |
 | [sonner](https://github.com/emilkowalski/sonner) | The toast library shadcn/ui recommends. Stacked, accessible notifications. |
-| Barlow + Barlow Condensed (`@fontsource/*`) | Self-hosted, so no third-party font requests. |
+| Epilogue + JetBrains Mono (`@fontsource-variable/*`) | Dealt by taste-skill for a gaming product. Self-hosted variable fonts, so no third-party font requests. |
 | [Anthropic's `frontend-design` skill](https://github.com/anthropics/skills/tree/main/skills/frontend-design) | Installed in `.claude/skills/frontend-design/`. Claude Code loads it automatically when working on the UI in this repo, so future changes follow the same design discipline. |
 
 ## Claude Code design setup
@@ -26,7 +26,7 @@ These skills live in `.claude/skills/` and load automatically when Claude Code w
 The `ui-ux-pro-max` search command runs from the repo root as `python3 .claude/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`. Its install path was changed from the plugin layout to the project layout.
 
 These skills were considered and left out:
-- **taste-skill.** It is built for marketing landing pages: photos, shader effects, one section per screen. It also adds a stop hook that runs its own browser checks after every turn. Neither suits an app UI.
+- **taste-skill** was left out at first (it targets marketing landing pages) and added later as `design-taste-frontend` without its stop hook. Its art direction is applied to the app as described in "taste-skill pass" below; its page-level rules (one section per screen, photographs, the finish gate) are for landing pages and are not used here.
 - **Agent bundles** such as wshobson/agents and awesome-claude-code-subagents. They are general purpose, so they add little for design.
 
 The audit with these skills changed the following:
@@ -59,18 +59,33 @@ Native `<input>` and `<select>` are kept (styled) on purpose: they work best on 
 >
 > | Token | Hex | Use |
 > |---|---|---|
-> | pitch | `#0b1324` | page background, inputs |
-> | stand | `#111b30` | panels |
-> | line | `#24355a` | borders, dividers |
-> | ink / dim | `#eaf0fa` / `#96a3c0` | text / secondary text |
+> | pitch | `#0a0d14` | page background, inputs |
+> | stand | `#11151f` | panels |
+> | line | `#252c3b` | borders, dividers |
+> | ink / dim | `#eceef3` / `#a3abba` | text / secondary text |
 > | blue | `#3b8bff` | side A, links, focus |
 > | orange | `#ff8a1f` | side B, primary buttons |
 >
-> **Type.** Barlow Condensed (700–800) for headings, team names and scores, like a broadcast graphic; Barlow for everything else. Numbers are tabular. No all-caps labels.
+> **Type.** Epilogue for everything, headings at 500 with tight tracking (never 700/800); JetBrains Mono for scores, counts and stats. Numbers are tabular. No all-caps labels, nothing under 13px.
 >
-> **The one bold element** is the scorebug: match headers are drawn like the in-game score display, a blue slab and an orange slab with slanted edges around the score. The brand mark and the tournament banner's blue/orange edge echo it. Everything else stays quiet: flat panels with 1px borders, one radius per level (12px panels, 9px controls, round chips), no decorative gradients on cards, motion only in response to an action.
+> **The one bold element** is the scorebug: match headers are drawn like the in-game score display, a blue slab and an orange slab with slanted edges around the score. The brand mark and the tournament banner's blue/orange edge echo it. Everything else stays quiet: flat panels with 1px borders, one radius per level (14px panels, 10px inner boxes, 8px controls, 6px badges), no decorative gradients on cards, motion only in response to an action.
 >
 > **Quality floor.** Works at 375px with no sideways scrolling (wide tables and brackets scroll inside their box), visible keyboard focus, Radix primitives for anything interactive, respects reduced motion.
+
+## taste-skill pass (November 2026)
+
+The `design-taste-frontend` skill was used to audit the redesign and remove what read as generic AI styling:
+
+- **Ground:** the saturated navy and the two radial "floodlight" glows behind the page are gone. The ground is a flat, near-neutral night (`#0a0d14`) so the blue and orange team colours are the only colour on screen.
+- **Type:** Barlow Condensed at 800 was replaced by Epilogue at 500 with tight tracking (the skill's pairing for games), and JetBrains Mono for scores, counts and stats. Body text is 16px.
+- **Header:** opaque with one hairline (no blur or transparency). Nav words draw an underline on hover and the current page holds a 2px orange bar on the header's edge, instead of a filled pill.
+- **One button system:** the primary is the one filled orange button, with no glow shadow; secondary buttons are outlined. Every button steps up 1px on hover and presses 1px down at .985 scale.
+- **Sign in with Discord** is a light button carrying Discord's real mark in its own colour, instead of a violet-filled button.
+- **Cards:** linked cards (tournaments, matches, 6mans rounds) lift 2px with a darker border and a soft shadow only on hover. The sign-up bar is one solid orange instead of a blue-to-orange gradient.
+- **Badges** are quiet tinted tags (6px radius, no outline) instead of outlined pills.
+- **Home:** the headline rises once on load, then the lead and buttons; a still diagram of the pitch at kickoff sits beside it on wide screens.
+- **Links** rest on a faint underline that takes the text colour on hover.
+- **Fixes:** the organizer control panel no longer leaves an empty half column when there is no vote running; full-width buttons with an icon stay on one line.
 
 ## Where things are
 

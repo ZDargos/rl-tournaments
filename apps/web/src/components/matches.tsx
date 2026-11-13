@@ -114,9 +114,9 @@ export function MatchList({ matches, myIds = [] }: { matches: MatchDto[]; myIds?
             <tr key={m.id} className={myIds.includes(m.id) ? 'highlight' : ''}>
               <td className="mono faint">{m.id}</td>
               <td><Link to={`/m/${m.id}`}>{m.label}</Link></td>
-              <td className={m.winner === 'a' ? 'team-a' : ''} style={{ fontWeight: m.winner === 'a' ? 750 : 400 }}>{m.a?.name ?? <span className="tbd">TBD</span>}</td>
+              <td className={m.winner === 'a' ? 'team-a' : ''} style={{ fontWeight: m.winner === 'a' ? 600 : 400 }}>{m.a?.name ?? <span className="tbd">TBD</span>}</td>
               <td className="num">{m.status === 'completed' ? (m.walkover ? 'bye' : m.forfeit ? 'FF' : `${m.winsA}–${m.winsB}`) : '—'}</td>
-              <td className={m.winner === 'b' ? 'team-b' : ''} style={{ fontWeight: m.winner === 'b' ? 750 : 400 }}>{m.b?.name ?? <span className="tbd">{m.walkover ? 'bye' : 'TBD'}</span>}</td>
+              <td className={m.winner === 'b' ? 'team-b' : ''} style={{ fontWeight: m.winner === 'b' ? 600 : 400 }}>{m.b?.name ?? <span className="tbd">{m.walkover ? 'bye' : 'TBD'}</span>}</td>
               <td><MatchBadge status={m.status} /></td>
             </tr>
           ))}
