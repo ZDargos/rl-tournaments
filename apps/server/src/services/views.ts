@@ -88,7 +88,7 @@ export async function tournamentDetail(ctx: AppContext, id: number, viewerId: st
   const showSkill = manage; // skill inputs are organizer-only
   // Availability is for organizers (and each player sees their own).
   const avail = availabilityOf(ctx, t);
-  const availOf = (userId: string) => (manage || userId === viewerId ? avail.get(userId)?.status ?? 'not_asked' : undefined);
+  const availOf = (userId: string) => (manage || userId === viewerId ? avail.get(userId)?.status ?? 'confirmed' : undefined);
   const entryDtos = visibleEntries.map((e) => ({
     id: e.id, kind: e.kind, name: e.kind === 'team' ? e.name : names.get(e.user_id!) ?? 'Player', userId: e.user_id, captainId: e.captain_id, status: e.status,
     checkedIn: !!e.checked_in_at, rosterLocked: !!e.roster_locked, createdAt: e.created_at,
@@ -143,7 +143,7 @@ export async function tournamentDetail(ctx: AppContext, id: number, viewerId: st
       swissRounds: t.format === 'swiss' && t.started_at ? swissTotalRounds(ctx, t) : null,
     },
     guild: guild ? { id: guild.id, name: guild.name, iconUrl: guild.iconUrl, botPresent: guild.botPresent } : null,
-    viewer: { userId: viewerId, role: access.role, canManage: manage, isCreator: access.isCreator, entryId: myEntry?.id ?? null, myMatchIds: myMatches, muted, availability: viewerId && myEntry ? avail.get(viewerId)?.status ?? 'not_asked' : null },
+    viewer: { userId: viewerId, role: access.role, canManage: manage, isCreator: access.isCreator, entryId: myEntry?.id ?? null, myMatchIds: myMatches, muted, availability: viewerId && myEntry ? avail.get(viewerId)?.status ?? 'confirmed' : null },
     entries: entryDtos,
     startPoll: pollView(ctx, t, viewerId, manage),
     dateVote: dateVoteView(ctx, t, viewerId, manage),

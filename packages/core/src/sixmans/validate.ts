@@ -82,3 +82,33 @@ export function swapInRound<T extends ScheduleToValidate>(schedule: T, round: nu
   rd.sitOut = replace(rd.sitOut);
   return copy;
 }
+
+/**
+ * Why each match of an edited schedule is not allowed, keyed "round:matchIndex" (index = position in
+ * the round's matches). Shown on the match while organizers drag players around; the full
+ * validateSchedule check still runs when the schedule is confirmed.
+ */
+export function scheduleMatchIssues(schedule: ScheduleToValidate): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  const trioSeen = new Map<string, string>();
+  for (const round of schedule.rounds) {
+    const inRound = new Map<string, number>();
+    round.matches.forEach((match, mi) => {
+      const issues: string[] = [];
+      if (match.teamA.length !== 3 || match.teamB.length !== 3) issues.push(`Uneven teams (${match.teamA.length}v${match.teamB.length}); each team needs exactly 3 players.`);
+      for (const p of [...match.teamA, ...match.teamB]) {
+        if (inRound.has(p)) issues.push(`A player is also in match ${inRound.get(p)! + 1} of this round.`);
+        inRound.set(p, mi);
+      }
+      for (const team of [match.teamA, match.teamB]) {
+        if (team.length !== 3) continue;
+        const key = canonicalTrio(team);
+        const where = `round ${round.round}${round.matches.length > 1 ? ` match ${mi + 1}` : ''}`;
+        if (trioSeen.has(key)) issues.push(`These three already play together in ${trioSeen.get(key)}.`);
+        else trioSeen.set(key, where);
+      }
+      if (issues.length) out[`${round.round}:${mi}`] = issues;
+    });
+  }
+  return out;
+}

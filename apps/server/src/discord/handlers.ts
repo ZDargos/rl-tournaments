@@ -620,7 +620,7 @@ async function handleButton(ctx: AppContext, i: BotInteraction): Promise<BotRepl
     const answer = await setAvailability(ctx, i.user.id, t.id, null, b === 'no' ? 'declined' : 'confirmed', src);
     return reply(answer === 'confirmed'
       ? `✅ Thanks! The organizers of **${esc(t.name)}** know you can make it. Changed your mind? Tap the other button.`
-      : `Got it, the organizers of **${esc(t.name)}** know you can't make it.${t.cfg.registration.allowWithdrawal ? ` If you won't play, please also withdraw so someone else can take your spot: \`/reg leave tournament:${t.id}\` in the server.` : ''}`);
+      : `Got it, your status in **${esc(t.name)}** is now "can't make it", so you won't be put in pools or matches. Changed your mind? Tap ✅ above any time before the start.${t.cfg.registration.allowWithdrawal ? ` If you won't play, please also withdraw so someone else can take your spot: \`/reg leave tournament:${t.id}\` in the server.` : ''}`);
   }
   if (kind === 'poll') {
     const r = await togglePollVote(ctx, i.user.id, Number(a), Number(b), src);

@@ -186,3 +186,58 @@ describe('6mans end to end', () => {
     void players;
   });
 });
+
+describe('6mans organizer edits and player status', () => {
+  it('players who can’t make it are left out of pools until they change their status', async () => {
+    const { admin, tid, players } = await sixmans(13);
+    const [first] = [...players.values()];
+    ok(await first.post(`/api/tournaments/${tid}/availability`, { answer: 'declined' }));
+    const pools = ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools`, {})).body;
+    const ids = pools.pools.flatMap((p: any) => p.players.map((x: any) => x.userId));
+    expect(ids.length).toBe(12);
+    expect(ids).not.toContain(first.id);
+    ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools/confirm`));
+    // Changing their mind changes the player list, so the confirmed pools are stale.
+    ok(await first.post(`/api/tournaments/${tid}/availability`, { answer: 'confirmed' }));
+    const check = await admin.post(`/api/tournaments/${tid}/actions/start`);
+    expect(JSON.stringify(check.body)).toMatch(/player list or skill values changed/);
+  });
+
+  it('dragged pools, matches and finals teams are saved even when illegal, and confirming refuses them', async () => {
+    const { admin, tid } = await sixmans(14);
+    const pools = ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools`, {})).body;
+    const ids = pools.pools.map((p: any) => p.players.map((x: any) => x.userId));
+    // Move one player: 6/8 is legal by size but uneven by two; 5/9 is too small too.
+    const uneven = [ids[0].slice(1), [...ids[1], ids[0][0]]];
+    const saved = ok(await admin.put(`/api/tournaments/${tid}/sixmans/pools`, { pools: uneven })).body;
+    expect(saved.pools.map((p: any) => p.players.length)).toEqual([6, 8]);
+    const refused = await admin.post(`/api/tournaments/${tid}/sixmans/pools/confirm`);
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body)).toMatch(/differ by more than one/);
+    ok(await admin.put(`/api/tournaments/${tid}/sixmans/pools`, { pools: ids }));
+    ok(await admin.post(`/api/tournaments/${tid}/sixmans/pools/confirm`));
+
+    const sched = ok(await admin.post(`/api/tournaments/${tid}/sixmans/schedule`, { rounds: 3 })).body;
+    const pool = sched.pools[0];
+    const rounds = pool.result.rounds.map((r: any) => ({ round: r.round, matches: r.matches.map((m: any) => ({ teamA: [...m.teamA], teamB: [...m.teamB] })) }));
+    // Drag a sitting-out player onto team A of round 1: a 4v3 match.
+    const sitter = pool.result.rounds[0].sitOut[0];
+    rounds[0].matches[0].teamA.push(sitter);
+    const edited = ok(await admin.put(`/api/tournaments/${tid}/sixmans/schedule/pool`, { poolIndex: pool.poolIndex, rounds })).body;
+    const r1 = edited.pools[0].result.rounds[0];
+    expect(r1.matches[0].teamA.length).toBe(4);
+    expect(r1.sitOut).not.toContain(sitter);
+    expect(edited.pools[0].result.appearances[sitter]).toBe(pool.result.appearances[sitter] + 1);
+    const no = await admin.post(`/api/tournaments/${tid}/sixmans/schedule/confirm`);
+    expect(no.status).toBe(400);
+    expect(JSON.stringify(no.body)).toMatch(/exactly 3 players/);
+    // A player twice in a round, or from another pool, is refused outright.
+    rounds[0].matches[0].teamB.push(sitter);
+    expect((await admin.put(`/api/tournaments/${tid}/sixmans/schedule/pool`, { poolIndex: pool.poolIndex, rounds })).status).toBe(400);
+    // Swapping two players across teams keeps it legal (no repeated trio in this tiny change, or it is flagged).
+    rounds[0].matches[0].teamB.pop();
+    rounds[0].matches[0].teamA.pop();
+    ok(await admin.put(`/api/tournaments/${tid}/sixmans/schedule/pool`, { poolIndex: pool.poolIndex, rounds }));
+    ok(await admin.post(`/api/tournaments/${tid}/sixmans/schedule/confirm`));
+  });
+});

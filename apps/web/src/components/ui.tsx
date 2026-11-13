@@ -84,16 +84,15 @@ export function MatchBadge({ status }: { status: string }) {
 }
 
 const AVAILABILITY: Record<string, { color: string; label: string; tip: string }> = {
-  confirmed: { color: 'green', label: 'Confirmed', tip: 'Said they can make it.' },
-  declined: { color: 'red', label: 'Can’t make it', tip: 'Said they can’t make it.' },
-  maybe: { color: 'orange', label: 'Maybe', tip: 'Did not answer within a day of the reminder.' },
-  awaiting: { color: 'yellow', label: 'Waiting', tip: 'Got the reminder, has not answered yet.' },
-  not_asked: { color: '', label: 'Not asked', tip: 'No reminder with the question has reached them yet (or their DMs are off).' },
+  confirmed: { color: 'green', label: 'Confirmed', tip: 'Signed up, or said they can still make it.' },
+  awaiting: { color: 'yellow', label: 'Pending', tip: 'Was asked if they can still make it and has not answered yet.' },
+  maybe: { color: 'orange', label: 'Pending, no reply', tip: 'Has not answered for a day since being asked.' },
+  declined: { color: 'red', label: 'Can’t make it', tip: 'Said they can’t make it: left out of pools and removed when the tournament starts, unless they change it.' },
 };
-export const AVAILABILITY_ORDER = ['confirmed', 'declined', 'maybe', 'awaiting', 'not_asked'] as const;
+export const AVAILABILITY_ORDER = ['confirmed', 'awaiting', 'maybe', 'declined'] as const;
 export function AvailabilityBadge({ status }: { status?: string | null }) {
   if (!status) return null;
-  const a = AVAILABILITY[status] ?? AVAILABILITY.not_asked;
+  const a = AVAILABILITY[status] ?? AVAILABILITY.confirmed;
   return <span className={cn('badge', a.color)} title={a.tip}>{a.label}</span>;
 }
 

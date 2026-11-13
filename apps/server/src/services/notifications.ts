@@ -344,7 +344,7 @@ async function deliver(ctx: AppContext, n: NotificationRow) {
         recordDelivery(ctx, n.id, 'dm', uid, 'sent');
         sent++;
         // The reminder asked "can you still make it?": the 24-hour reply clock starts now.
-        if (msg.dmButtons?.length && t && n.category === 'tournament_start') markAsked(ctx, t, uid, !!payload.manual);
+        if (msg.dmButtons?.length && t && n.category === 'tournament_start') markAsked(ctx, t, uid);
       } catch (err) {
         if (err instanceof DiscordApiError && (err.code === DiscordCodes.CannotDM || err.permanent)) {
           recordDelivery(ctx, n.id, 'dm', uid, 'failed', err.message);

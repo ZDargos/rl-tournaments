@@ -8,13 +8,14 @@ import { userNames } from './users.js';
 import { escapeDiscord } from '../lib/util.js';
 
 /**
- * "Can you still make it?" Start reminder DMs carry two buttons; the answer is stored per player per
- * tournament. A player who was asked and has not answered a day later is marked "maybe" and the
- * organizers are told. Answers only count for the start time they were given for: if the start
- * moves, everyone is back to "not asked" and the next reminder asks again.
+ * Each registered player's status. Signing up makes them confirmed (no row = confirmed). Every
+ * "can you still make it?" check that reaches them (start reminder DMs carry two buttons) puts them
+ * back to pending until they answer; still pending a day later becomes "pending, no reply" and the
+ * organizers are told. "Can't make it" keeps them out of pools and the start until they change it;
+ * checks never reset that answer.
  */
 
-export type Availability = 'confirmed' | 'declined' | 'maybe' | 'awaiting' | 'not_asked';
+export type Availability = 'confirmed' | 'declined' | 'maybe' | 'awaiting';
 
 export const NO_REPLY_HOURS = 24;
 
@@ -34,10 +35,15 @@ export function availabilityCustomId(tournamentId: number, answer: 'yes' | 'no')
   return `avail:${tournamentId}:${answer}`;
 }
 
-/** Current answers (for the current start time), by user id. Missing = not asked. */
-export function availabilityOf(ctx: AppContext, t: LoadedTournament): Map<string, { status: Availability; askedAt: string | null; answeredAt: string | null; byOrganizer: boolean }> {
-  const rows = ctx.db.prepare('SELECT * FROM availability WHERE tournament_id = ? AND start_at = ?').all(t.id, startKey(t)) as Row[];
+/** Current statuses, by user id. Missing = confirmed (signed up, no check since). */
+export function availabilityOf(ctx: AppContext, t: { id: number }): Map<string, { status: Availability; askedAt: string | null; answeredAt: string | null; byOrganizer: boolean }> {
+  const rows = ctx.db.prepare('SELECT * FROM availability WHERE tournament_id = ?').all(t.id) as Row[];
   return new Map(rows.map((r) => [r.user_id, { status: r.status, askedAt: r.asked_at, answeredAt: r.answered_at, byOrganizer: !!r.answered_by && r.answered_by !== r.user_id }]));
+}
+
+/** Players who said they can't make it: they are left out of pools and removed at the start. */
+export function declinedPlayers(ctx: AppContext, tournamentId: number): Set<string> {
+  return new Set((ctx.db.prepare("SELECT user_id FROM availability WHERE tournament_id = ? AND status = 'declined'").all(tournamentId) as { user_id: string }[]).map((r) => r.user_id));
 }
 
 /** Players of confirmed registrations (the people who signed up and got a spot). */
@@ -62,20 +68,19 @@ function activePlayer(ctx: AppContext, tournamentId: number, userId: string) {
 }
 
 /**
- * A start reminder with buttons reached this player. Keeps an existing answer for the same start time,
- * except that an organizer asking again turns a "maybe" (no reply) back into a fresh question.
+ * A "can you still make it?" check reached this player: they are pending again until they answer.
+ * Someone who said they can't make it stays that way (they can still change it themselves), and
+ * someone already pending keeps the time they were first asked, so the no-reply clock keeps running.
  */
-export function markAsked(ctx: AppContext, t: LoadedTournament, userId: string, askAgain = false) {
+export function markAsked(ctx: AppContext, t: LoadedTournament, userId: string) {
   const now = nowIso(ctx);
   ctx.db
     .prepare(
       `INSERT INTO availability (tournament_id, user_id, start_at, status, asked_at, answered_at, answered_by, updated_at) VALUES (?, ?, ?, 'awaiting', ?, NULL, NULL, ?)
        ON CONFLICT(tournament_id, user_id) DO UPDATE SET start_at = excluded.start_at, status = 'awaiting', asked_at = excluded.asked_at, answered_at = NULL, answered_by = NULL, updated_at = excluded.updated_at
-       WHERE availability.start_at <> excluded.start_at OR (? AND availability.status = 'maybe')`,
+       WHERE availability.status = 'confirmed'`,
     )
-    .run(t.id, userId, startKey(t), now, now, askAgain ? 1 : 0);
-  // Answered on the website before any reminder: remember when they were first asked anyway.
-  ctx.db.prepare('UPDATE availability SET asked_at = ? WHERE tournament_id = ? AND user_id = ? AND asked_at IS NULL').run(now, t.id, userId);
+    .run(t.id, userId, startKey(t), now, now);
 }
 
 /**
@@ -117,23 +122,22 @@ export async function setAvailability(ctx: AppContext, actorId: string, tourname
   if (!isPreStart(t.state)) throw conflict('already_started', t.state === 'cancelled' ? 'This tournament was cancelled.' : 'The tournament has already started.');
   const now = nowIso(ctx);
   const start = startKey(t);
-  const prev = ctx.db.prepare('SELECT status FROM availability WHERE tournament_id = ? AND user_id = ? AND start_at = ?').get(t.id, target, start) as { status: string } | undefined;
+  const prev = ctx.db.prepare('SELECT status FROM availability WHERE tournament_id = ? AND user_id = ?').get(t.id, target) as { status: string } | undefined;
   tx(ctx, () => {
     ctx.db
       .prepare(
         `INSERT INTO availability (tournament_id, user_id, start_at, status, asked_at, answered_at, answered_by, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
          ON CONFLICT(tournament_id, user_id) DO UPDATE SET
-           asked_at = CASE WHEN availability.start_at = excluded.start_at THEN availability.asked_at ELSE NULL END,
            start_at = excluded.start_at, status = excluded.status, answered_at = excluded.answered_at, answered_by = excluded.answered_by, updated_at = excluded.updated_at`,
       )
       .run(t.id, target, start, answer, now, actorId, now);
     ctx.db.prepare('UPDATE tournaments SET version = version + 1 WHERE id = ?').run(t.id);
     audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'registration.availability', target: `user:${target}`, details: { answer, source } });
-    // Tell the organizers right away when a player says they can't make it (once per start time).
+    // Tell the organizers right away when a player says they can't make it.
     if (answer === 'declined' && !byOrganizer && prev?.status !== 'declined') {
       const name = userNames(ctx, [target]).get(target) ?? 'A player';
       enqueue(ctx, {
-        tournamentId: t.id, category: 'organizer_alert', key: `t${t.id}:avail-declined:${target}:${start}`, audience: 'admins',
+        tournamentId: t.id, category: 'organizer_alert', key: `t${t.id}:avail-declined:${target}:${now}`, audience: 'admins',
         payload: { text: `${name} says they can't make it.` },
       });
     }
@@ -144,14 +148,14 @@ export async function setAvailability(ctx: AppContext, actorId: string, tourname
 
 const WAITING_STATES = "('draft','published','registration_open','registration_closed','ready')";
 
-/** Players asked over a day ago who never answered become "maybe"; organizers get one DM per tournament. */
+/** Players asked over a day ago who never answered become "pending, no reply"; organizers get one DM per tournament. */
 export function flagNoReplies(ctx: AppContext): number {
   const now = ctx.clock.now();
   const cutoff = new Date(now.getTime() - NO_REPLY_HOURS * 3600_000).toISOString();
   const rows = ctx.db
     .prepare(
       `SELECT a.tournament_id, a.user_id, a.start_at FROM availability a JOIN tournaments t ON t.id = a.tournament_id
-       WHERE a.status = 'awaiting' AND a.asked_at <= ? AND t.state IN ${WAITING_STATES} AND t.start_at = a.start_at AND t.start_at > ?`,
+       WHERE a.status = 'awaiting' AND a.asked_at <= ? AND t.state IN ${WAITING_STATES} AND t.start_at > ?`,
     )
     .all(cutoff, now.toISOString()) as { tournament_id: number; user_id: string; start_at: string }[];
   const byTournament = new Map<number, string[]>();
@@ -169,7 +173,7 @@ export function flagNoReplies(ctx: AppContext): number {
       ctx.db.prepare('UPDATE tournaments SET version = version + 1 WHERE id = ?').run(tid);
       enqueue(ctx, {
         tournamentId: tid, category: 'organizer_alert', key: `t${tid}:avail-maybe:${now.toISOString()}`, audience: 'admins',
-        payload: { text: `${late.length === 1 ? 'This player has' : `These ${late.length} players have`} not said whether they can make it, a day after the reminder, so they are marked as maybe: ${joinNames(list, 1500)}` },
+        payload: { text: `${late.length === 1 ? 'This player has' : `These ${late.length} players have`} not answered whether they can still make it, a day after the check, so they are flagged as no reply: ${joinNames(list, 1500)}` },
       });
     });
     flagged += late.length;
@@ -190,13 +194,12 @@ export function joinNames(names: string[], max: number): string {
 
 export const AVAILABILITY_LABELS: Record<Availability, string> = {
   confirmed: '✅ Confirmed',
+  awaiting: '⏳ Pending',
+  maybe: '🟠 Pending (no reply)',
   declined: '❌ Can’t make it',
-  maybe: '🟠 Maybe (no reply)',
-  awaiting: '⏳ Waiting for a reply',
-  not_asked: '➖ Not asked yet',
 };
 
-/** The organizers' digest 24 hours before the start: every confirmed signup by availability. */
+/** The organizers' digest 24 hours before the start: every confirmed signup by status. */
 export function availabilityDigest(ctx: AppContext, t: LoadedTournament): string | null {
   const players = confirmedPlayers(ctx, t.id);
   if (!players.length) return null;
@@ -204,10 +207,10 @@ export function availabilityDigest(ctx: AppContext, t: LoadedTournament): string
   const names = userNames(ctx, players);
   const groups = new Map<Availability, string[]>();
   for (const u of players) {
-    const s = answers.get(u)?.status ?? 'not_asked';
+    const s = answers.get(u)?.status ?? 'confirmed';
     groups.set(s, [...(groups.get(s) ?? []), escapeDiscord(names.get(u) ?? 'Player')]);
   }
-  const order: Availability[] = ['confirmed', 'declined', 'maybe', 'awaiting', 'not_asked'];
+  const order: Availability[] = ['confirmed', 'awaiting', 'maybe', 'declined'];
   const present = order.filter((s) => groups.has(s));
   // Discord allows 2000 characters; share the room between the groups.
   const room = Math.floor(1300 / present.length);
@@ -217,5 +220,5 @@ export function availabilityDigest(ctx: AppContext, t: LoadedTournament): string
   });
   const waitlisted = (ctx.db.prepare("SELECT COUNT(*) c FROM entries WHERE tournament_id = ? AND status = 'waitlisted'").get(t.id) as { c: number }).c;
   const ready = groups.get('confirmed')?.length ?? 0;
-  return `${ready} of ${players.length} signed-up players have confirmed.\n${lines.join('\n')}${waitlisted ? `\nWaitlist: ${waitlisted}.` : ''}`;
+  return `${ready} of ${players.length} signed-up players are confirmed.\n${lines.join('\n')}${waitlisted ? `\nWaitlist: ${waitlisted}.` : ''}`;
 }

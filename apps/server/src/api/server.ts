@@ -25,6 +25,7 @@ import {
 import { abandonMatch, adminResolve, confirmResult, disputeResult, replacePlayer, reportProgress, reportResult, swapCompetitors } from '../services/results.js';
 import {
   confirmPools, confirmSchedule, editFinalsTeams, editPools, generateSchedule, makePoolsProposal, previewFinals, startFinals, swapScheduledPlayers,
+  editSchedulePool,
 } from '../services/sixmans.js';
 import { listTournaments, matchDetail, tournamentDetail } from '../services/views.js';
 import { playerProfile, searchPlayers } from '../services/stats.js';
@@ -447,6 +448,11 @@ export async function buildServer(ctx: AppContext, opts: ServerOptions = {}): Pr
     }).parse(req.body ?? {}), src));
   app.post('/api/tournaments/:id/sixmans/schedule/swap', async (req) =>
     swapScheduledPlayers(ctx, requireUser(req).id, tid(req), z.object({ poolIndex: z.number().int().min(0), round: z.number().int().min(1), playerA: snowflake, playerB: snowflake }).parse(req.body), src));
+  app.put('/api/tournaments/:id/sixmans/schedule/pool', async (req) =>
+    editSchedulePool(ctx, requireUser(req).id, tid(req), z.object({
+      poolIndex: z.number().int().min(0),
+      rounds: z.array(z.object({ round: z.number().int().min(1), matches: z.array(z.object({ teamA: z.array(snowflake).max(12), teamB: z.array(snowflake).max(12) })).min(1).max(5) })).min(1).max(60),
+    }).parse(req.body), src));
   app.post('/api/tournaments/:id/sixmans/schedule/confirm', async (req) => confirmSchedule(ctx, requireUser(req).id, tid(req), src));
   app.post('/api/tournaments/:id/sixmans/finals/preview', async (req) =>
     previewFinals(ctx, requireUser(req).id, tid(req), z.object({

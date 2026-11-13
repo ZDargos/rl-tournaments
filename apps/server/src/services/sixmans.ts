@@ -1,6 +1,6 @@
 import {
   buildFinalsBracket, computeSixmansStandings, computeSkills, conflict, crossPoolOrder, defaultQualifiersPerPool, finalsOptions, formFinalsTeams, invalid,
-  handPickedOption, isPreStart, makePools, planEqualRounds, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
+  handPickedOption, isPreStart, validatePoolsStructure, validateFinalsTeamsStructure, makePools, planEqualRounds, notFound, qualify, scheduleGroupStage, swapInRound, validateFinalsTeams, validatePools, validateSchedule,
   type FinalsOption, type FinalsTeam, type FinalsTeamFormation, type PlayerStanding, type QualifierEntry, type SixmansMatchResult, type SkilledPlayer,
 } from '@rl/core';
 import type { AppContext, Source } from './context.js';
@@ -13,6 +13,7 @@ import { entriesOf } from './registration.js';
 import { randomInt } from 'node:crypto';
 import { sha256 } from '../lib/util.js';
 import { userNames } from './users.js';
+import { declinedPlayers } from './availability.js';
 import { insertMatch, notifyNewlyReady, syncBracket, type SchedulePlanData } from './engine.js';
 
 /**
@@ -88,9 +89,10 @@ function assertSixmans(t: LoadedTournament) {
   if (t.cfg.format !== 'sixmans') throw invalid('not_sixmans', 'This is not a 6mans tournament.');
 }
 
-/** Skill values for the confirmed players, from the tournament's selected skill method. */
+/** Skill values for the confirmed players (not those who said they can't make it), from the tournament's selected skill method. */
 export function confirmedSkills(ctx: AppContext, t: LoadedTournament): SkilledPlayer[] {
-  const entries = entriesOf(ctx, t.id, ['confirmed']).filter((e) => e.kind === 'player');
+  const out = declinedPlayers(ctx, t.id);
+  const entries = entriesOf(ctx, t.id, ['confirmed']).filter((e) => e.kind === 'player' && !out.has(e.user_id!));
   return computeSkills(entries.map((e) => ({ id: e.user_id!, seed: e.seed, rank: e.rank, division: e.rank_division })), t.cfg);
 }
 
@@ -146,17 +148,21 @@ export async function makePoolsProposal(ctx: AppContext, actorId: string, id: nu
   return data;
 }
 
-/** Organizer edits to the proposed pools (full assignment), validated. */
+/**
+ * Organizer edits to the proposed pools (full assignment, from dragging players between pools).
+ * Every player must be in exactly one pool; pools that are too small or uneven are saved anyway and
+ * marked on the page, and Confirm pools refuses them.
+ */
 export async function editPools(ctx: AppContext, actorId: string, id: number, pools: string[][], source: Source) {
   const t = await prestartManager(ctx, actorId, id);
   const plan = currentPlan(ctx, t.id, 'pools');
   if (!plan) throw notFound('Pool proposal');
   const skills = confirmedSkills(ctx, t);
-  const problems = validatePools(pools, skills.map((s) => s.id));
+  const problems = validatePoolsStructure(pools, skills.map((s) => s.id));
   if (problems.length) throw invalid('invalid_pools', problems.join(' '), { problems });
   const byId = new Map(skills.map((s) => [s.id, s]));
   const prev = JSON.parse(plan.data) as PoolsPlanData;
-  const averages = pools.map((p) => p.reduce((s, u) => s + byId.get(u)!.skill, 0) / p.length);
+  const averages = pools.map((p) => (p.length ? p.reduce((s, u) => s + byId.get(u)!.skill, 0) / p.length : 0));
   const data: PoolsPlanData = {
     ...prev,
     poolCount: pools.length,
@@ -311,6 +317,62 @@ export async function swapScheduledPlayers(ctx: AppContext, actorId: string, id:
   tx(ctx, () => {
     savePlan(ctx, t, 'schedule', 'proposed', data, plan.fingerprint, actorId);
     audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.schedule_edited', details: { ...input, source } });
+  });
+  return data;
+}
+
+/**
+ * Organizer edits to one pool's proposed schedule (from dragging players between teams, matches and
+ * the sit-out list within a round). Players stay in their round; uneven teams and repeated trios are
+ * saved anyway and marked on the page, and Confirm schedule refuses them.
+ */
+export async function editSchedulePool(
+  ctx: AppContext, actorId: string, id: number,
+  input: { poolIndex: number; rounds: { round: number; matches: { teamA: string[]; teamB: string[] }[] }[] }, source: Source,
+) {
+  const t = await prestartManager(ctx, actorId, id);
+  const plan = currentPlan(ctx, t.id, 'schedule');
+  if (!plan) throw notFound('Schedule proposal');
+  if (plan.status === 'confirmed') throw conflict('schedule_confirmed', 'The schedule is confirmed. Generate it again to make changes.');
+  const data = JSON.parse(plan.data) as SchedulePlanData;
+  const pool = data.pools.find((p) => p.poolIndex === input.poolIndex);
+  if (!pool || pool.result.status !== 'ok') throw notFound('Pool schedule');
+  const old = pool.result.rounds;
+  if (input.rounds.length !== old.length || input.rounds.some((r, i) => r.round !== old[i].round || r.matches.length !== old[i].matches.length))
+    throw invalid('invalid_edit', 'Rounds and matches cannot be added or removed here; only players can be moved.');
+  const inPool = new Set(pool.playerIds);
+  for (const r of input.rounds) {
+    const seen = new Set<string>();
+    for (const u of r.matches.flatMap((m) => [...m.teamA, ...m.teamB])) {
+      if (!inPool.has(u)) throw invalid('not_in_pool', 'Only players from this pool can be scheduled in it.');
+      if (seen.has(u)) throw invalid('invalid_edit', `A player is in round ${r.round} twice.`);
+      seen.add(u);
+    }
+  }
+  const skills = new Map(ctx.db.prepare('SELECT user_id, skill FROM pool_members WHERE pool_id = ?').all(pool.poolId).map((r) => [(r as { user_id: string }).user_id, (r as { skill: number }).skill]));
+  const sum = (team: string[]) => team.reduce((s, u) => s + (skills.get(u) ?? 0), 0);
+  const result = pool.result;
+  result.rounds = input.rounds.map((r) => {
+    const playing = new Set(r.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
+    return {
+      round: r.round,
+      matches: r.matches.map((m, i) => ({ round: r.round, index: i, teamA: m.teamA, teamB: m.teamB, skillA: sum(m.teamA), skillB: sum(m.teamB) })),
+      sitOut: pool.playerIds.filter((u) => !playing.has(u)),
+    };
+  });
+  const appearances: Record<string, number> = Object.fromEntries(pool.playerIds.map((u) => [u, 0]));
+  for (const r of result.rounds) for (const m of r.matches) for (const u of [...m.teamA, ...m.teamB]) appearances[u]++;
+  const counts = Object.values(appearances);
+  const min = Math.min(...counts);
+  const max = Math.max(...counts);
+  result.appearances = appearances;
+  // Hand edits may trade equal games for other choices; the page shows the new spread.
+  result.balance = { ...result.balance, min, max, spread: max - min, ideal: max - min <= result.balance.idealSpread, provenBest: false, totalSlots: counts.reduce((a, b) => a + b, 0) };
+  const diffs = result.rounds.flatMap((r) => r.matches.map((m) => Math.abs(m.skillA - m.skillB)));
+  result.skill = { ...result.skill, totalDiff: diffs.reduce((a, b) => a + b, 0), maxDiff: Math.max(0, ...diffs) };
+  tx(ctx, () => {
+    savePlan(ctx, t, 'schedule', 'proposed', data, plan.fingerprint, actorId);
+    audit(ctx, { guildId: t.guild_id, tournamentId: t.id, actorId, action: 'sixmans.schedule_edited', details: { poolIndex: input.poolIndex, source } });
   });
   return data;
 }
@@ -475,7 +537,8 @@ export async function editFinalsTeams(ctx: AppContext, actorId: string, id: numb
     data.optionId = custom.id;
   }
   const option = data.options.find((o) => o.id === data.optionId)!;
-  const problems = validateFinalsTeams(teams, option.players);
+  // Teams without exactly 3 players are saved and marked; Start finals refuses them.
+  const problems = validateFinalsTeamsStructure(teams, option.players);
   if (problems.length) throw invalid('invalid_teams', problems.join(' '), { problems });
   const skill = new Map([...data.qualified, ...data.others].map((q) => [q.playerId, q.skill]));
   const names = userNames(ctx, option.players);

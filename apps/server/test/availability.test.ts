@@ -62,20 +62,21 @@ describe('start reminders in hours', () => {
 });
 
 describe('availability confirmations', () => {
-  it('reminder DMs ask, answers are recorded, silence becomes maybe after a day, and organizers get a digest', async () => {
+  it('signing up confirms, reminder DMs set pending, answers are recorded, silence is flagged after a day, and organizers get a digest', async () => {
     const { s, admin, ps, tid, statusOf, adminDms } = await upcoming();
     s.discord.dmClosed.add(ps[3].id);
-    expect(await statusOf(ps[0].id)).toBe('not_asked');
+    expect(await statusOf(ps[0].id)).toBe('confirmed');
 
     s.clock.advance(24 * 60); // 48 hours before the start: first reminder
     await s.settle();
     const dm = s.discord.sent.find((m) => m.kind === 'dm' && m.target === ps[0].id && /starts/.test(m.content))!;
-    expect(dm.content).toMatch(/Can you still make it/);
+    expect(dm.content).toMatch(/Reminder:\*\* you're signed up for \*\*Friday Cup\*\*/);
+    expect(dm.content).toMatch(/checking in to make sure you can still make it/);
     expect(dm.buttons!.map((b) => b.customId)).toEqual([`avail:${tid}:yes`, `avail:${tid}:no`]);
     // The channel post has no buttons.
     expect(s.discord.sent.find((m) => m.kind === 'channel' && /starts/.test(m.content))!.buttons).toEqual([]);
     expect(await statusOf(ps[0].id)).toBe('awaiting');
-    expect(await statusOf(ps[3].id)).toBe('not_asked'); // DMs closed: never asked
+    expect(await statusOf(ps[3].id)).toBe('confirmed'); // DMs closed: never asked, stays confirmed
 
     expect((await handleInteraction(s.ctx, dmButton(ps[0].id, `avail:${tid}:yes`)))!.content).toMatch(/know you can make it/);
     expect((await handleInteraction(s.ctx, dmButton(ps[1].id, `avail:${tid}:no`)))!.content).toMatch(/can't make it/);
@@ -97,25 +98,26 @@ describe('availability confirmations', () => {
     s.clock.advance(60); // 24 hours before: a day without a reply, and the digest
     await s.settle();
     expect(await statusOf(ps[2].id)).toBe('maybe');
-    const flagged = adminDms().filter((c) => /marked as maybe/.test(c));
+    const flagged = adminDms().filter((c) => /flagged as no reply/.test(c));
     expect(flagged.length).toBe(1);
     expect(flagged[0]).toMatch(/player12/);
     expect(flagged[0]).not.toMatch(/player10|player11|player13/);
     const digest = adminDms().find((c) => /Who can make it/.test(c))!;
-    expect(digest).toMatch(/1 of 4 signed-up players have confirmed/);
-    expect(digest).toMatch(/Confirmed \(1\)\*\*: player10/);
+    // The 24-hour reminder is another check: player10 is pending again until they answer it.
+    expect(digest).toMatch(/1 of 4 signed-up players are confirmed/);
+    expect(digest).toMatch(/Confirmed \(1\)\*\*: player13/);
+    expect(digest).toMatch(/Pending \(1\)\*\*: player10/);
     expect(digest).toMatch(/Can’t make it \(1\)\*\*: player11/);
-    expect(digest).toMatch(/Maybe \(no reply\) \(1\)\*\*: player12/);
-    expect(digest).toMatch(/Not asked yet \(1\)\*\*: player13/);
+    expect(digest).toMatch(/Pending \(no reply\) \(1\)\*\*: player12/);
 
-    // A later reminder keeps the answers, and a maybe can still answer.
+    // A player with no reply can still answer.
     ok(await ps[2].post(`/api/tournaments/${tid}/availability`, { answer: 'confirmed' }));
     expect(await statusOf(ps[2].id)).toBe('confirmed');
     await s.settle();
     await s.settle();
-    expect(adminDms().filter((c) => /marked as maybe/.test(c)).length).toBe(1);
+    expect(adminDms().filter((c) => /flagged as no reply/.test(c)).length).toBe(1);
     expect(adminDms().filter((c) => /Who can make it/.test(c)).length).toBe(1);
-    expect(await statusOf(ps[0].id)).toBe('confirmed');
+    expect(await statusOf(ps[0].id)).toBe('awaiting');
   });
 
   it('organizers can set a player’s status; other players cannot', async () => {
@@ -126,16 +128,37 @@ describe('availability confirmations', () => {
     expect((await admin.post(`/api/tournaments/${tid}/availability`, { answer: 'confirmed' })).status).toBe(404); // the organizer is not playing
   });
 
-  it('moving the start time resets the answers', async () => {
+  it('moving the start time keeps statuses; the next check sets everyone but can’t-make-it back to pending', async () => {
     const { s, admin, ps, tid, startAt, statusOf } = await upcoming();
-    ok(await ps[0].post(`/api/tournaments/${tid}/availability`, { answer: 'confirmed' }));
-    expect(await statusOf(ps[0].id)).toBe('confirmed');
+    ok(await ps[1].post(`/api/tournaments/${tid}/availability`, { answer: 'declined' }));
     const later = new Date(Date.parse(startAt) + 24 * 3600_000).toISOString();
     ok(await admin.patch(`/api/tournaments/${tid}`, { configPatch: { schedule: { startAt: later } } }));
-    expect(await statusOf(ps[0].id)).toBe('not_asked');
+    expect(await statusOf(ps[0].id)).toBe('confirmed');
+    expect(await statusOf(ps[1].id)).toBe('declined');
+    ok(await admin.post(`/api/tournaments/${tid}/availability-check`, {}));
+    await s.settle();
+    expect(await statusOf(ps[0].id)).toBe('awaiting');
+    expect(await statusOf(ps[1].id)).toBe('declined');
+    // They can change their mind any time before the start.
+    ok(await ps[1].post(`/api/tournaments/${tid}/availability`, { answer: 'confirmed' }));
+    expect(await statusOf(ps[1].id)).toBe('confirmed');
     // The digest moved with the start: only one is pending, for the new time.
     const digests = s.db.prepare("SELECT idempotency_key k FROM notifications WHERE tournament_id = ? AND category = 'availability_digest' AND status = 'pending'").all(tid) as { k: string }[];
     expect(digests.map((d) => d.k)).toEqual([`t${tid}:digest:${later}`]);
+  });
+
+  it('players who can’t make it are removed at the start; signing up again confirms them', async () => {
+    const { s, admin, ps, tid, statusOf } = await upcoming();
+    ok(await ps[1].post(`/api/tournaments/${tid}/availability`, { answer: 'declined' }));
+    ok(await ps[1].post(`/api/tournaments/${tid}/withdraw`, {}));
+    ok(await ps[1].post(`/api/tournaments/${tid}/register`, {}));
+    expect(await statusOf(ps[1].id)).toBe('confirmed');
+    ok(await admin.post(`/api/tournaments/${tid}/availability`, { answer: 'declined', userId: ps[2].id }));
+    ok(await admin.post(`/api/tournaments/${tid}/actions/start`));
+    await s.settle();
+    const d = ok(await admin.get(`/api/tournaments/${tid}`)).body;
+    expect(d.entries.find((e: any) => e.userId === ps[2].id).status).toBe('removed');
+    expect(d.entries.filter((e: any) => e.status === 'confirmed').length).toBe(3);
   });
 
   it('answers are refused once the tournament has started', async () => {
@@ -146,7 +169,7 @@ describe('availability confirmations', () => {
 });
 
 describe('availability checks sent by organizers', () => {
-  const startDms = (s: any, userId: string) => s.discord.sent.filter((m: any) => m.kind === 'dm' && m.target === userId && /Can you still make it/.test(m.content));
+  const startDms = (s: any, userId: string) => s.discord.sent.filter((m: any) => m.kind === 'dm' && m.target === userId && /can still make it/.test(m.content));
 
   it('sends the reminder to everyone or to one player, by DM only, and asks again', async () => {
     const { s, admin, ps, tid, statusOf } = await upcoming({ dms: false });

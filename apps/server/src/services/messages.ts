@@ -38,8 +38,9 @@ export function renderNotification(
         const text = `⏰ ${title} starts ${discordTime(t.cfg.schedule.startAt!, 'R')} (${discordTime(t.cfg.schedule.startAt!, 'f')}). ${t.cfg.checkIn.enabled ? 'Remember to check in! ' : ''}${tLink}`;
         return {
           channel: text,
-          dm: `${text}
-Can you still make it? Tap below so the organizers know.`,
+          dm: `⏰ **Reminder:** you're signed up for ${title}, which starts ${discordTime(t.cfg.schedule.startAt!, 'R')} (${discordTime(t.cfg.schedule.startAt!, 'f')}).
+We're just checking in to make sure you can still make it. Tap a button below so the organizers know. Until you answer, your status shows as pending.${t.cfg.checkIn.enabled ? '\nRemember to check in when check-in opens.' : ''}
+${tLink}`,
           mentionUserIds: [],
           dmButtons: [
             { customId: availabilityCustomId(t.id, 'yes'), label: '✅ I can make it', style: 'success' },

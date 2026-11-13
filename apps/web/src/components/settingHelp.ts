@@ -51,7 +51,7 @@ export const HELP = {
 
   // Registration & schedule
   timezone: 'The time zone you enter and see the times below in. In Discord, everyone sees times in their own time zone.' + LOCK,
-  startAt: 'When the tournament begins. Start reminders, check-in and the organizers’ availability list (24 hours before) are timed from this. Moving it reschedules them and resets everyone’s “can you make it” answers.' + LOCK,
+  startAt: 'When the tournament begins. Start reminders, check-in and the organizers’ availability list (24 hours before) are timed from this. Moving it reschedules them; players keep their status.' + LOCK,
   opensAt: 'Registration opens automatically at this time. Empty: it opens when you open it.' + LOCK,
   startVote: 'Let players vote on the start time instead of setting one. Add every time you could start (up to 25) and when voting closes. The vote is posted in the registration channel, with a link to the tournament, when you publish. Players pick every time that works for them. When voting closes (at the deadline, or when you press Close now), the time with the most votes becomes the start time, registration opens and everyone who voted for it is registered. While the vote runs you can add times or move the deadline; to remove a time, cancel the vote.' + LOCK,
   closesAt: 'Registration closes automatically at this time (it must be before the start). Empty: it stays open until you close it.' + LOCK,

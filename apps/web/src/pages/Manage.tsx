@@ -242,8 +242,13 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
   const allPlayers = d.competitors.flatMap((c: any) => c.players);
   // Availability of everyone on a confirmed registration (players, or each team member).
   const signedUp = d.entries.filter((e: any) => e.status === 'confirmed').flatMap((e: any) => (e.kind === 'team' ? e.members : [{ userId: e.userId, availability: e.availability }]));
-  const availCounts = AVAILABILITY_ORDER.map((s) => [s, signedUp.filter((m: any) => (m.availability ?? 'not_asked') === s).length] as const).filter(([, n]) => n > 0);
-  const setAvail = (userId: string, answer: string) => act(() => api(`/api/tournaments/${t.id}/availability`, { body: { userId, answer } }), 'Availability saved');
+  const availCounts = AVAILABILITY_ORDER.map((s) => [s, signedUp.filter((m: any) => (m.availability ?? 'confirmed') === s).length] as const).filter(([, n]) => n > 0);
+  const setAvail = (userId: string, answer: string) => act(() => api(`/api/tournaments/${t.id}/availability`, { body: { userId, answer } }), 'Status saved');
+  // Registrations that are not plain sign-ups show their registration state instead of a player status.
+  const ENTRY_STATE: Record<string, { label: string; color: string }> = {
+    pending: { label: 'Awaiting approval', color: 'blue' }, waitlisted: { label: 'Waitlisted', color: 'yellow' }, rejected: { label: 'Rejected', color: '' },
+    withdrawn: { label: 'Withdrew', color: '' }, removed: { label: 'Removed', color: '' }, no_show: { label: 'No-show', color: '' },
+  };
   // Organizers can send the start reminder (with the "can you still make it?" buttons) by hand.
   const canRemind = !started && t.state !== 'cancelled' && !!t.startAt;
   const remind = async (userId: string | null, name?: string) => {
@@ -265,7 +270,7 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
           <h3>Registrations</h3>
           <div className="row">
             {canRemind && signedUp.length > 0 && (
-              <ConfirmButton className="btn small primary" label={<><Send aria-hidden />Ask everyone if they can make it</>} confirm="DM every registered player the start reminder now, with the “Can you still make it?” buttons? Players who turned off bot DMs or muted this tournament are skipped." onConfirm={() => remind(null)} />
+              <ConfirmButton className="btn small primary" label={<><Send aria-hidden />Ask everyone if they can make it</>} confirm="DM every registered player a reminder that they’re in this tournament, checking that they can still make it? Confirmed players go back to pending until they answer. Players who turned off bot DMs or muted this tournament are skipped." onConfirm={() => remind(null)} />
             )}
             {t.config.registrationMode === 'team' && t.teamSize > 1 && !started && (
               <>
@@ -277,28 +282,27 @@ function Entries({ d, reload }: { d: any; reload: () => void }) {
         </div>
         {signedUp.length > 0 && !started && (
           <div className="row small" style={{ marginBottom: 10, gap: 8 }}>
-            <span className="muted">Can they make it?<Help text="Players answer with the buttons in their start reminder DMs, or on the tournament page. You can send that reminder now with the buttons here (to everyone, or Ask next to a player). Anyone who has not answered a day after the reminder turns orange (maybe) and you get a DM. You can also set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
+            <span className="muted">Status<Help text="Signing up makes a player confirmed. Every “can you still make it?” check (the start reminder DMs, or Ask here) puts them back to pending until they answer with the buttons or on the tournament page. Anyone still pending a day later turns orange and you get a DM. Players marked can’t make it are left out of pools and removed when the tournament starts; they can change it any time before then, and you can set it here if a player told you directly. 24 hours before the start, organizers get this list by DM." /></span>
             {availCounts.map(([s, n]) => <span key={s} className="row" style={{ gap: 4 }}><AvailabilityBadge status={s} /> {n}</span>)}
           </div>
         )}
         {entries.length === 0 ? <Empty icon={Users} title="No registrations yet">Share the tournament link, or add players above.</Empty> : (
           <div className="table-wrap">
             <table className="table">
-              <thead><tr><th>Name</th><th>Status</th><th>Can make it?</th>{t.config.checkIn.enabled && <th>Check-in</th>}<th>{six && t.config.sixmans.skillMethod === 'rank' ? 'Rank' : 'Seed'}</th><th /></tr></thead>
+              <thead><tr><th>Name</th><th>Status</th>{t.config.checkIn.enabled && <th>Check-in</th>}<th>{six && t.config.sixmans.skillMethod === 'rank' ? 'Rank' : 'Seed'}</th><th /></tr></thead>
               <tbody>
                 {entries.map((e: any) => (
                   <tr key={e.id}>
                     <td><strong>{e.name}</strong>{e.kind === 'team' && <div className="tiny muted">{e.members.map((m: any) => `${m.name}${m.role === 'captain' ? ' (C)' : m.role === 'substitute' ? ' (sub)' : ''}`).join(', ')}</div>}</td>
-                    <td><span className={`badge ${e.status === 'confirmed' ? 'green' : e.status === 'pending' ? 'blue' : e.status === 'waitlisted' ? 'yellow' : ''}`}>{e.status}</span></td>
                     <td>
-                      {!['pending', 'confirmed', 'waitlisted'].includes(e.status) ? '—' : (
+                      {e.status !== 'confirmed' ? <span className={`badge ${ENTRY_STATE[e.status]?.color ?? ''}`}>{ENTRY_STATE[e.status]?.label ?? e.status}</span> : (
                         <div className="stack" style={{ gap: 4 }}>
                           {(e.kind === 'team' ? e.members : [{ userId: e.userId, name: null, availability: e.availability }]).map((m: any) => (
                             <div key={m.userId} className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
                               {m.name && <span className="tiny muted">{m.name}</span>}
                               <AvailabilityBadge status={m.availability} />
                               {!started && (
-                                <select aria-label="Set availability" className="tiny" value="" disabled={busy} onChange={(ev) => ev.target.value && void setAvail(m.userId, ev.target.value)} style={{ width: 'auto', padding: '2px 4px' }}>
+                                <select aria-label="Set status" className="tiny" value="" disabled={busy} onChange={(ev) => ev.target.value && void setAvail(m.userId, ev.target.value)} style={{ width: 'auto', padding: '2px 4px' }}>
                                   <option value="">Set…</option>
                                   <option value="confirmed">Confirmed</option>
                                   <option value="declined">Can’t make it</option>
