@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, loginUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { ErrorBox, Field, Spinner } from '../components/ui';
+import { ErrorBox, Field, Spinner, DiscordMark } from '../components/ui';
 
 export function LoginPage() {
   const { meta, me } = useAuth();
@@ -20,7 +20,7 @@ export function LoginPage() {
       <h1>Log in</h1>
       <p className="muted">We use Discord to know who you are and which servers you are in. We only ask for <code>identify</code> and <code>guilds</code>; we never see your messages or password, and we never store your Discord token.</p>
       {meta?.oauthConfigured === false && <div className="alert warn" style={{ marginBottom: 14 }}>Discord login is not configured on this server yet (missing client id/secret).</div>}
-      <a className="btn discord large block" href={loginUrl(returnTo)}>Continue with Discord</a>
+      <a className="btn discord large block" href={loginUrl(returnTo)}><DiscordMark />Continue with Discord</a>
       {meta?.devLogin && (
         <details style={{ marginTop: 18 }} open>
           <summary>Developer login (local testing only)</summary>
@@ -81,7 +81,7 @@ export function AuthCompletePage() {
       <div className="card" style={{ maxWidth: 520, margin: '20px auto' }}>
         <ErrorBox error={error} />
         <div className="spacer" />
-        <Link className="btn discord" to="/login">Try again</Link>
+        <Link className="btn discord" to="/login"><DiscordMark />Try again</Link>
       </div>
     );
   return <Spinner label="Logging you in…" />;

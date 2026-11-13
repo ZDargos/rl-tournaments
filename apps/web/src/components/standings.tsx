@@ -12,8 +12,8 @@ export function StandingsTable({ rows, myCompetitorIds = [] }: { rows: any[]; my
           {rows.map((r) => (
             <tr key={r.entrantId} className={myCompetitorIds.includes(r.competitorId) ? 'highlight' : ''}>
               <td>{r.rank}</td>
-              <td style={{ fontWeight: 650 }}>{r.name}{r.byes ? <span className="badge" style={{ marginLeft: 6 }}>bye×{r.byes}</span> : null}</td>
-              <td className="num" style={{ fontWeight: 800 }}>{r.points}</td>
+              <td style={{ fontWeight: 500 }}>{r.name}{r.byes ? <span className="badge" style={{ marginLeft: 6 }}>bye×{r.byes}</span> : null}</td>
+              <td className="num" style={{ fontWeight: 600 }}>{r.points}</td>
               <td className="num">{r.wins}</td>
               <td className="num">{r.losses}</td>
               <td className="num hide-sm">{r.gameWins}–{r.gameLosses}</td>
@@ -41,10 +41,10 @@ export function SixmansStandings({ pool, me, showSkill }: { pool: any; me?: stri
           {pool.standings.map((r: any) => (
             <tr key={r.playerId} className={`${r.qualified ? 'qualified' : ''} ${r.playerId === me ? 'highlight' : ''}`}>
               <td>{r.rank}</td>
-              <td style={{ fontWeight: 650 }}>
+              <td style={{ fontWeight: 500 }}>
                 {r.name} {r.qualified && <span className="badge green" style={{ marginLeft: 4 }}>Q</span>}
               </td>
-              <td className="num" style={{ fontWeight: 800 }}>{r.points}</td>
+              <td className="num" style={{ fontWeight: 600 }}>{r.points}</td>
               <td className="num">{r.wins}–{r.losses}</td>
               <td className="num">{r.goalDiff > 0 ? '+' : ''}{r.goalDiff}</td>
               <td className="num">{r.goalsFor}</td>

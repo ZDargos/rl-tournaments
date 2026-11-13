@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync } from '../lib/hooks';
 import { Bell, KeyRound, LogOut, Mail, Server, User } from 'lucide-react';
-import { Alert, Avatar, Check, Empty, ErrorBox, Spinner, useToast } from '../components/ui';
+import { Alert, Avatar, Check, Empty, ErrorBox, Spinner, useToast, DiscordMark } from '../components/ui';
 import { fmtDate } from '../lib/format';
 import { TournamentCard } from './Home';
 
@@ -16,7 +16,7 @@ export function MePage() {
   const { busy, error, run } = useAsync();
   useEffect(() => { if (me) api<any[]>('/api/me/guilds').then(setGuilds).catch(() => setGuilds([])); }, [me]);
   if (loading) return <Spinner />;
-  if (!me) return <Empty icon={KeyRound} title="Log in to see your account"><Link className="btn discord" to="/login">Log in with Discord</Link></Empty>;
+  if (!me) return <Empty icon={KeyRound} title="Log in to see your account"><Link className="btn discord" to="/login"><DiscordMark />Log in with Discord</Link></Empty>;
   const prefs = me.preferences;
   const setPref = async (patch: Record<string, boolean>) => { if (await run(() => api('/api/me/preferences', { method: 'PATCH', body: patch }))) { toast('Saved'); refresh(); } };
   return (
@@ -60,7 +60,7 @@ export function MePage() {
         <div className="card">
           <h3 className="section-title"><Server aria-hidden />Your servers</h3>
           {!guilds ? <Spinner /> : guilds.length === 0 ? <p className="muted small">None of your Discord servers have the bot yet.</p> : guilds.map((g) => (
-            <Link key={g.id} to={`/s/${g.id}`} className="row between" style={{ padding: '8px 10px', borderRadius: 9, border: '1px solid var(--line)', marginBottom: 8, color: 'var(--text)' }}>
+            <Link key={g.id} to={`/s/${g.id}`} className="row between" style={{ padding: '8px 10px', borderRadius: 'var(--radius-control)', border: '1px solid var(--line)', marginBottom: 8, color: 'var(--text)' }}>
               <span>{g.name}</span>
               <span className="row">{g.isAdmin && <span className="badge blue">admin</span>}{g.canCreate && <span className="badge">can create</span>}{!g.botPresent && <span className="badge red">bot missing</span>}</span>
             </Link>
