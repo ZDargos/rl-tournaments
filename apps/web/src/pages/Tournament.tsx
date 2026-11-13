@@ -241,11 +241,12 @@ function RegistrationPanel({ d, reload }: { d: any; reload: () => void }) {
           )}
           {!t.startedAt && t.state !== 'cancelled' && d.viewer.availability && (
             <div className="stack tight" style={{ padding: 12, borderRadius: 10, background: 'var(--color-pitch)', border: '1px solid var(--line)' }}>
-              <div className="row between small"><span>Can you make it{t.startAt ? ` on ${fmtDate(t.startAt)}` : ''}?</span><AvailabilityBadge status={d.viewer.availability} /></div>
+              <div className="row between small"><span>Your status{t.startAt ? ` for ${fmtDate(t.startAt)}` : ''}</span><AvailabilityBadge status={d.viewer.availability} /></div>
               <div className="row" style={{ gap: 8 }}>
-              <button className="btn small blue" disabled={busy || d.viewer.availability === 'confirmed'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'confirmed' } }), 'Thanks, the organizers know you can make it')}>I can make it</button>
-              <button className="btn small ghost" disabled={busy || d.viewer.availability === 'declined'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'declined' } }), 'The organizers know you can’t make it')}>I can’t make it</button>
+              <button className="btn small blue" disabled={busy || d.viewer.availability === 'confirmed'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'confirmed' } }), 'Thanks, you’re confirmed')}>I can make it</button>
+              <button className="btn small ghost" disabled={busy || d.viewer.availability === 'declined'} onClick={() => void act(() => api(`/api/tournaments/${t.id}/availability`, { body: { answer: 'declined' } }), 'You’re marked as can’t make it')}>I can’t make it</button>
               </div>
+              {d.viewer.availability === 'declined' && <div className="tiny muted">You won’t be put in pools or matches, and you’ll be taken out when the tournament starts, unless you change this.</div>}
             </div>
           )}
           <div className="row">
@@ -328,7 +329,7 @@ function Participants({ d }: { d: any }) {
             <h3>{{ confirmed: 'Registered', pending: 'Waiting for approval', waitlisted: 'Waitlist' }[g]} <span className="tab-count">{es.length}</span></h3>
             <div className="table-wrap">
               <table className="table">
-                <thead><tr><th>#</th><th>{d.tournament.teamSize > 1 && d.tournament.config.registrationMode === 'team' ? 'Team' : 'Player'}</th><th>Roster</th><th>Check-in</th>{d.viewer.canManage && !d.tournament.startedAt && <th>Can make it?</th>}</tr></thead>
+                <thead><tr><th>#</th><th>{d.tournament.teamSize > 1 && d.tournament.config.registrationMode === 'team' ? 'Team' : 'Player'}</th><th>Roster</th><th>Check-in</th>{d.viewer.canManage && !d.tournament.startedAt && <th>Status</th>}</tr></thead>
                 <tbody>
                   {es.map((e: any, i: number) => (
                     <tr key={e.id} className={e.id === d.viewer.entryId ? 'highlight' : ''}>

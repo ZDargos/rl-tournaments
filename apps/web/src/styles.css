@@ -409,6 +409,24 @@
   .pool-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
   .player-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--color-pitch); border: 1px solid var(--line); font-size: 0.875rem; margin: 3px; max-width: 100%; }
   .player-pill.me { border-color: var(--orange); }
+  .player-pill.draggable { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; transition: border-color 120ms var(--ease), opacity 120ms var(--ease); }
+  .player-pill.draggable:hover { border-color: var(--line2); }
+  .player-pill.draggable:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .player-pill.dragging { opacity: 0.35; }
+  .player-pill.swap-target { border-color: var(--blue); background: rgb(59 139 255 / 0.14); }
+  .player-pill.drag-overlay { cursor: grabbing; border-color: var(--blue); box-shadow: 0 12px 28px -10px rgb(0 0 0 / 0.7); }
+  .drop-zone { transition: border-color 120ms var(--ease), background-color 120ms var(--ease); }
+  .drop-zone.drop-ready { outline: 1px dashed var(--line2); outline-offset: 2px; }
+  .drop-zone.drop-over { outline-color: var(--blue); background-color: rgb(59 139 255 / 0.08); }
+  .drop-zone.drop-invalid, .round.drop-invalid { border-color: rgb(255 90 110 / 0.55); }
+  .team-zone { min-height: 40px; border-radius: var(--radius-inner); padding: 2px; display: flex; flex-wrap: wrap; align-content: flex-start; }
+  .team-zone.b { justify-content: flex-end; }
+  .sit-zone { min-height: 34px; margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+  .match-box { border: 1px solid transparent; border-radius: var(--radius-inner); padding: 4px; margin-bottom: 6px; }
+  body.is-dragging { user-select: none; -webkit-user-select: none; cursor: grabbing; }
+  .team-zone .player-pill { padding: 2px 8px; font-size: 0.8125rem; margin: 2px; }
+  .bench-zone { margin-top: 16px; }
+  .issue { color: var(--red); font-size: 0.8125rem; margin-top: 4px; }
   .player-pill select { width: auto; min-height: 0; padding: 0 4px; border: 0; background: transparent; font-size: 0.8125rem; }
   .round { border: 1px solid var(--line); border-radius: var(--radius-inner); padding: 14px; background: var(--color-pitch); min-width: 0; color: var(--text); }
   a.round { text-decoration: none; }

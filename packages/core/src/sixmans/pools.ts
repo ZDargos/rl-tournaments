@@ -120,6 +120,38 @@ export function makePools(players: SkilledPlayer[], poolCount: number, seed: num
   };
 }
 
+/**
+ * Why each pool cannot be used as it is (empty list = fine): too few players, or sizes that differ
+ * by more than one. Shown next to the pool while organizers move players around.
+ */
+export function poolIssues(pools: string[][]): string[][] {
+  const sizes = pools.map((p) => p.length);
+  const min = Math.min(...sizes);
+  const max = Math.max(...sizes);
+  return pools.map((pl) => {
+    const out: string[] = [];
+    if (pl.length < MIN_POOL_SIZE) out.push(`Has ${pl.length} players; each pool needs at least ${MIN_POOL_SIZE}.`);
+    if (max - min > 1 && (pl.length === max || pl.length === min)) out.push(`Pool sizes ${sizes.join('/')} differ by more than one player.`);
+    return out;
+  });
+}
+
+/** Every confirmed player in exactly one pool, and nobody else. Sizes are not checked here. */
+export function validatePoolsStructure(pools: string[][], playerIds: string[]): string[] {
+  const problems: string[] = [];
+  const seen = new Map<string, number>();
+  pools.forEach((pl, i) => {
+    for (const id of pl) {
+      if (seen.has(id)) problems.push(`Player ${id} is in pool ${seen.get(id)! + 1} and pool ${i + 1}.`);
+      seen.set(id, i);
+    }
+  });
+  const all = new Set(playerIds);
+  for (const id of seen.keys()) if (!all.has(id)) problems.push(`Player ${id} is not a confirmed participant.`);
+  for (const id of all) if (!seen.has(id)) problems.push(`Player ${id} is not assigned to any pool.`);
+  return problems;
+}
+
 /** Validate an organizer-edited pool assignment. */
 export function validatePools(pools: string[][], playerIds: string[]): string[] {
   const problems: string[] = [];

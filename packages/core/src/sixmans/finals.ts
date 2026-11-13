@@ -217,6 +217,11 @@ function groupTeams(players: TeamPlayer[], mode: 'balanced' | 'standings_snake',
   return teams;
 }
 
+/** Every finals player on exactly one team (team sizes are not checked here). */
+export function validateFinalsTeamsStructure(teams: { players: string[] }[], expectedPlayers: string[]): string[] {
+  return validateFinalsTeams(teams, expectedPlayers).filter((p) => !/finals teams need exactly 3/.test(p));
+}
+
 export function validateFinalsTeams(teams: { players: string[] }[], expectedPlayers: string[]): string[] {
   const problems: string[] = [];
   const seen = new Set<string>();

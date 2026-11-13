@@ -13,6 +13,7 @@ import { cancelPending, enqueue, scheduleMatchReminders } from './notifications.
 import { competitorsOf, matchesOf, matchGames, type CompetitorRow, type MatchRow } from './queries.js';
 import { entriesOf, entryMembers, lockRosters, type EntryRow } from './registration.js';
 import { userNames } from './users.js';
+import { declinedPlayers } from './availability.js';
 import { currentPlan, planFingerprints, proposeFinals } from './sixmans.js';
 
 const FINISHED = new Set(['completed', 'void', 'cancelled']);
@@ -27,6 +28,8 @@ export interface StartCheck {
   warnings: string[];
   entrants: number;
   noShows: number[];
+  /** Solo registrations whose player said they can't make it; removed when the tournament starts. */
+  declined: number[];
 }
 
 function orderedEntries(t: LoadedTournament, entries: EntryRow[]): EntryRow[] {
@@ -51,7 +54,15 @@ export async function checkStart(ctx: AppContext, t: LoadedTournament): Promise<
   const noShows = t.cfg.checkIn.enabled ? confirmed.filter((e) => !e.checked_in_at).map((e) => e.id) : [];
   if (noShows.length && !t.cfg.checkIn.removeNoShows) problems.push(`${noShows.length} registration(s) have not checked in. Check them in or remove them.`);
   else if (noShows.length) warnings.push(`${noShows.length} registration(s) did not check in and will be removed as no-shows.`);
-  const playing = confirmed.filter((e) => !noShows.includes(e.id));
+  // Solo players who said they can't make it are out: removed at the start, like no-shows.
+  const out = declinedPlayers(ctx, t.id);
+  const declined = confirmed.filter((e) => e.kind === 'player' && out.has(e.user_id!) && !noShows.includes(e.id)).map((e) => e.id);
+  if (declined.length) warnings.push(`${declined.length} player(s) said they can't make it and will be removed.`);
+  for (const e of confirmed.filter((x) => x.kind === 'team')) {
+    const missing = entryMembers(ctx, e.id).filter((m) => out.has(m.user_id)).length;
+    if (missing) warnings.push(`Team "${e.name}": ${missing} player(s) said they can't make it.`);
+  }
+  const playing = confirmed.filter((e) => !noShows.includes(e.id) && !declined.includes(e.id));
   const pending = entriesOf(ctx, t.id, ['pending']).length;
   if (pending) warnings.push(`${pending} registration(s) are still awaiting approval and will not play.`);
   const minRoster = t.cfg.registration.minRoster ?? t.cfg.teamSize;
@@ -105,7 +116,7 @@ export async function checkStart(ctx: AppContext, t: LoadedTournament): Promise<
   }
   if (t.cfg.notifications.channelAnnouncements && !(t.cfg.notifications.announcementChannelId ?? guild?.announcement_channel_id))
     warnings.push('Channel announcements are on but no announcement channel is set (server settings or tournament).');
-  return { ok: problems.length === 0, problems, warnings, entrants: entrantCount, noShows };
+  return { ok: problems.length === 0, problems, warnings, entrants: entrantCount, noShows, declined };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -209,6 +220,11 @@ export async function startTournament(ctx: AppContext, actorId: string | null, i
       ctx.db.prepare("UPDATE entries SET status = 'removed', updated_at = ? WHERE id = ?").run(now, eid);
       ctx.db.prepare('UPDATE entry_members SET active = 0, left_at = ? WHERE entry_id = ? AND active = 1').run(now, eid);
       audit(ctx, { guildId: t.guild_id, tournamentId: id, actorId, action: 'registration.no_show_removed', target: `entry:${eid}` });
+    }
+    for (const eid of check.declined) {
+      ctx.db.prepare("UPDATE entries SET status = 'removed', updated_at = ? WHERE id = ?").run(now, eid);
+      ctx.db.prepare('UPDATE entry_members SET active = 0, left_at = ? WHERE entry_id = ? AND active = 1').run(now, eid);
+      audit(ctx, { guildId: t.guild_id, tournamentId: id, actorId, action: 'registration.declined_removed', target: `entry:${eid}` });
     }
     lockRosters(ctx, t, actorId);
     const entries = entriesOf(ctx, id, ['confirmed']);

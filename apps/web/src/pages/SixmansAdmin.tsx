@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAsync } from '../lib/hooks';
-import { FINALS_TEAM_FORMATION_LABELS, FINALS_TEAM_FORMATIONS } from '@rl/core';
-import { Alert, ErrorBox, Field, useToast } from '../components/ui';
+import { FINALS_TEAM_FORMATION_LABELS, FINALS_TEAM_FORMATIONS, poolIssues, scheduleMatchIssues } from '@rl/core';
+import { applyDrop, DragBoard, DragPill, DropZone, type DropResult } from '../components/dnd';
+import { Alert, ErrorBox, useToast } from '../components/ui';
 import { SixmansStandings } from '../components/standings';
 import { RoundsPreview } from '../components/sixmansRounds';
 
@@ -40,11 +41,21 @@ function PoolsEditor({ d, names, reload }: { d: any; names: Map<string, string>;
   const [count, setCount] = useState<number>(t.config.sixmans.poolCount);
   const plan = sm.pools?.data;
   const confirmed = sm.pools?.status === 'confirmed';
-  const confirmedPlayers = d.entries.filter((e: any) => e.status === 'confirmed').length;
-  const move = async (userId: string, to: number) => {
-    const pools: string[][] = plan.pools.map((p: any) => p.players.map((x: any) => x.userId).filter((u: string) => u !== userId));
-    pools[to].push(userId);
-    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools`, { method: 'PUT', body: { pools } }))) reload();
+  const out = new Set(d.entries.filter((e: any) => e.status === 'confirmed' && e.availability === 'declined').map((e: any) => e.userId));
+  const confirmedPlayers = d.entries.filter((e: any) => e.status === 'confirmed').length - out.size;
+  // Shown right away while the move saves.
+  const [local, setLocal] = useState<string[][] | null>(null);
+  const saved: string[][] = plan ? plan.pools.map((p: any) => p.players.map((x: any) => x.userId)) : [];
+  const pools = local ?? saved;
+  const info = new Map<string, any>(plan ? plan.pools.flatMap((p: any) => p.players.map((x: any) => [x.userId, x])) : []);
+  const issues = plan ? poolIssues(pools) : [];
+  const legal = issues.every((x) => x.length === 0);
+  const drop = async (r: DropResult) => {
+    const zones = applyDrop(Object.fromEntries(pools.map((p, i) => [`pool:${i}`, p])), r);
+    const next = pools.map((_, i) => zones[`pool:${i}`]);
+    setLocal(next);
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools`, { method: 'PUT', body: { pools: next } }))) await reload();
+    setLocal(null);
   };
   return (
     <div className="card">
@@ -53,31 +64,29 @@ function PoolsEditor({ d, names, reload }: { d: any; names: Map<string, string>;
         <div className="row">
           <label className="row small muted">Pools <input type="number" min={1} max={32} value={count} onChange={(e) => setCount(Number(e.target.value))} style={{ width: 70 }} /></label>
           <button className="btn" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools`, { body: { poolCount: count } }))) { toast('Pools proposed'); reload(); } }}>{plan ? 'Re-make pools' : 'Make pools'}</button>
-          {plan && !confirmed && <button className="btn primary" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools/confirm`, { body: {} }))) { toast('Pools confirmed'); reload(); } }}>Confirm pools</button>}
+          {plan && !confirmed && <button className="btn primary" disabled={busy || !legal} title={legal ? undefined : 'Fix the pools marked in red first'} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/pools/confirm`, { body: {} }))) { toast('Pools confirmed'); reload(); } }}>Confirm pools</button>}
         </div>
       </div>
-      <p className="muted small">{confirmedPlayers} confirmed players. Pools are filled by snake draft on skill ({t.config.sixmans.skillMethod === 'rank' ? 'RL rank' : 'manual seed'}), then balanced by swaps; sizes differ by at most one; minimum 6 per pool. The same input always gives the same pools. Re-making or editing pools clears any schedule.</p>
+      <p className="muted small">{confirmedPlayers} confirmed players{out.size ? ` (${out.size} who can’t make it are left out)` : ''}. Pools are filled by snake draft on skill ({t.config.sixmans.skillMethod === 'rank' ? 'RL rank' : 'manual seed'}), then balanced by swaps; sizes differ by at most one; minimum 6 per pool. The same input always gives the same pools. Re-making or editing pools clears any schedule.</p>
       <ErrorBox error={error} />
       {plan && (
         <>
           <p className="small">Average skill per pool: {plan.averages.map((a: number) => a.toFixed(1)).join(' · ')} (spread {plan.averageSpread.toFixed(2)})</p>
-          <div className="pool-grid">
-            {plan.pools.map((p: any) => (
-              <div className="round" key={p.index}>
-                <h4>{p.name} · {p.players.length} players</h4>
-                {p.players.map((x: any) => (
-                  <span key={x.userId} className="player-pill">
-                    {names.get(x.userId) ?? x.userId} <span className="muted tiny">{x.skill.toFixed(0)}{x.imputed ? '*' : ''}</span>
-                    {!confirmed && (
-                      <select aria-label={`Move ${names.get(x.userId)}`} value={p.index} onChange={(e) => void move(x.userId, Number(e.target.value))}>
-                        {plan.pools.map((q: any) => <option key={q.index} value={q.index}>{q.name.replace('Pool ', '→')}</option>)}
-                      </select>
-                    )}
-                  </span>
-                ))}
-              </div>
-            ))}
-          </div>
+          {!confirmed && <p className="small muted">Drag a name to another pool to move it, or onto another name to swap the two.</p>}
+          <DragBoard onDrop={(r) => void drop(r)} disabled={busy || confirmed}>
+            <div className="pool-grid">
+              {plan.pools.map((p: any, i: number) => (
+                <DropZone key={p.index} zone={`pool:${i}`} className="round" invalid={issues[i]?.length > 0} label={p.name}>
+                  <h4>{p.name} · {pools[i]?.length ?? 0} players</h4>
+                  {(pools[i] ?? []).map((u) => {
+                    const x = info.get(u);
+                    return <DragPill key={u} item={u} zone={`pool:${i}`} disabled={confirmed} label={names.get(u) ?? u} extra={x && <span className="muted tiny">{x.skill.toFixed(0)}{x.imputed ? '*' : ''}</span>} />;
+                  })}
+                  {issues[i]?.map((m) => <div key={m} className="issue">{m}</div>)}
+                </DropZone>
+              ))}
+            </div>
+          </DragBoard>
           {plan.pools.some((p: any) => p.players.some((x: any) => x.imputed)) && <p className="tiny muted">* no rank/seed given; treated as {t.config.sixmans.missingSkill}.</p>}
         </>
       )}
@@ -95,10 +104,32 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
   const [games, setGames] = useState<number | null>(t.config.sixmans.gamesPerPlayer ?? null);
   const poolSizes: number[] = sm.pools?.data.pools.map((p: any) => p.players.length) ?? [];
   const [balanced, setBalanced] = useState<boolean>(t.config.sixmans.skillBalancedTeams);
-  const [swap, setSwap] = useState<{ pool: number; round: number; a: string; b: string }>({ pool: 0, round: 1, a: '', b: '' });
   const plan = sm.schedule?.data;
   const confirmed = sm.schedule?.status === 'confirmed';
   const n = (u: string) => names.get(u) ?? u;
+  // Edited rounds per pool, shown right away while the move saves.
+  const [local, setLocal] = useState<Record<number, any[]>>({});
+  const roundsOf = (p: any): any[] => local[p.poolIndex] ?? p.result.rounds;
+  const issuesOf = (p: any) => (p.result.status === 'ok' ? scheduleMatchIssues({ rounds: roundsOf(p) }) : {});
+  const neverPlays = (p: any) => {
+    const rounds = roundsOf(p);
+    const playing = new Set(rounds.flatMap((r: any) => r.matches.flatMap((m: any) => [...m.teamA, ...m.teamB])));
+    return p.playerIds.filter((u: string) => !playing.has(u));
+  };
+  const legal = !!plan && plan.pools.every((p: any) => p.result.status === 'ok' && Object.keys(issuesOf(p)).length === 0 && neverPlays(p).length === 0);
+  const drop = async (p: any, r: DropResult) => {
+    const rd = roundsOf(p).find((x: any) => r.from.startsWith(`${x.round}:`));
+    if (!rd) return;
+    const zones: Record<string, string[]> = { [`${rd.round}:sit`]: rd.sitOut ?? [] };
+    rd.matches.forEach((m: any, i: number) => { zones[`${rd.round}:${i}:A`] = m.teamA; zones[`${rd.round}:${i}:B`] = m.teamB; });
+    const z = applyDrop(zones, r);
+    const changed = { ...rd, matches: rd.matches.map((m: any, i: number) => ({ ...m, teamA: z[`${rd.round}:${i}:A`], teamB: z[`${rd.round}:${i}:B`] })), sitOut: z[`${rd.round}:sit`] };
+    const rounds = roundsOf(p).map((x: any) => (x.round === rd.round ? changed : x));
+    setLocal((l) => ({ ...l, [p.poolIndex]: rounds }));
+    const body = { poolIndex: p.poolIndex, rounds: rounds.map((x: any) => ({ round: x.round, matches: x.matches.map((m: any) => ({ teamA: m.teamA, teamB: m.teamB })) })) };
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule/pool`, { method: 'PUT', body }))) await reload();
+    setLocal((l) => { const { [p.poolIndex]: _, ...rest } = l; return rest; });
+  };
   return (
     <div className="card">
       <div className="card-head">
@@ -114,7 +145,7 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
           <label className="check small"><input type="checkbox" checked={balanced} onChange={(e) => setBalanced(e.target.checked)} /> Skill-balanced</label>
           <button className="btn" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule`, { body: mode === 'fixed' ? { mode, rounds, skillBalanced: balanced } : { mode, games, skillBalanced: balanced } }))) reload(); }}>{busy ? 'Searching…' : plan ? 'Regenerate' : 'Generate schedule'}</button>
           {plan && !confirmed && plan.pools.every((p: any) => p.result.status === 'ok') && (
-            <button className="btn primary" disabled={busy} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule/confirm`, { body: {} }))) { toast('Schedule confirmed'); reload(); } }}>Confirm schedule</button>
+            <button className="btn primary" disabled={busy || !legal} title={legal ? undefined : 'Fix the matches marked in red first'} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule/confirm`, { body: {} }))) { toast('Schedule confirmed'); reload(); } }}>Confirm schedule</button>
           )}
         </div>
       </div>
@@ -122,7 +153,7 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
         <RoundsPreview players={poolSizes.reduce((a, b) => a + b, 0)} poolCount={poolSizes.length} matchesPerRound={t.config.sixmans.matchesPerRound} games={games} />
       )}
       {plan?.notes?.length > 0 && <div className="alert info small">{plan.notes.map((x: string) => <div key={x}>{x}</div>)}</div>}
-      <p className="muted small">One 3v3 match per round per pool. The scheduler guarantees no trio of teammates repeats in a pool, balances how often each player plays, and (optionally) balances team skill. Every schedule is re-checked by an independent validator.</p>
+      <p className="muted small">One 3v3 match per round per pool. The scheduler guarantees no trio of teammates repeats in a pool, balances how often each player plays, and (optionally) balances team skill. Every schedule is re-checked by an independent validator.{plan && !confirmed && ' To change a match, drag a name to the other team, another match or the sit-out row of the same round, or onto another name to swap the two. Matches that are not allowed are marked in red with the reason.'}</p>
       <ErrorBox error={error} />
       {plan?.pools.map((p: any) => {
         const r = p.result;
@@ -135,51 +166,58 @@ function ScheduleEditor({ d, names, reload }: { d: any; names: Map<string, strin
               {r.infeasibility?.alternatives?.length > 0 && <ul>{r.infeasibility.alternatives.map((a: string) => <li key={a}>{a}</li>)}</ul>}
             </div>
           );
+        const issues = issuesOf(p);
+        const idle = neverPlays(p);
+        const edit = !confirmed;
         return (
           <div key={p.poolId} style={{ marginTop: 16 }}>
             <div className="row between">
               <h4 style={{ margin: 0 }}>{poolName} · {p.playerIds.length} players · {r.rounds.length} rounds</h4>
               <span className="small muted">
-                {r.balance.min === r.balance.max ? `${r.balance.min} games per player (equal)` : <>Games per player {r.balance.min}–{r.balance.max} {r.balance.ideal ? '(ideal)' : r.balance.provenBest ? '(best possible, proven)' : '(best found)'}</>} · skill diff total {r.skill.totalDiff.toFixed?.(0) ?? r.skill.totalDiff} (best found) · no repeated trios ✓
+                {r.balance.min === r.balance.max ? `${r.balance.min} games per player (equal)` : <>Games per player {r.balance.min}–{r.balance.max} {r.balance.ideal ? '(ideal)' : r.balance.provenBest ? '(best possible, proven)' : '(best found)'}</>} · skill diff total {r.skill.totalDiff.toFixed?.(0) ?? r.skill.totalDiff}{Object.keys(issues).length === 0 && ' · no repeated trios ✓'}
               </span>
             </div>
-            <div className="grid auto" style={{ marginTop: 8 }}>
-              {r.rounds.map((rd: any) => (
-                <div className="round" key={rd.round}>
-                  <h4>Round {rd.round}</h4>
-                  {rd.matches.map((m: any) => (
-                    <div key={m.index} className="vs" style={{ marginBottom: 6 }}>
-                      <div className="team-a small">{m.teamA.map(n).join(', ')}<div className="tiny muted">{m.skillA?.toFixed?.(0)}</div></div>
-                      <span className="label">vs</span>
-                      <div className="team-b small" style={{ textAlign: 'right' }}>{m.teamB.map(n).join(', ')}<div className="tiny muted">{m.skillB?.toFixed?.(0)}</div></div>
+            {idle.length > 0 && <div className="issue">Never plays: {idle.map(n).join(', ')}. Every player needs at least one match.</div>}
+            <DragBoard onDrop={(x) => void drop(p, x)} disabled={busy || !edit}>
+              <div className="grid auto" style={{ marginTop: 8 }}>
+                {roundsOf(p).map((rd: any) => {
+                  const group = `p${p.poolIndex}r${rd.round}`;
+                  const bad = rd.matches.some((_: any, i: number) => issues[`${rd.round}:${i}`]);
+                  return (
+                    <div className={`round ${bad ? 'drop-invalid' : ''}`} key={rd.round}>
+                      <h4>Round {rd.round}</h4>
+                      {rd.matches.map((m: any, i: number) => {
+                        const why = issues[`${rd.round}:${i}`];
+                        return (
+                          <div key={i} className={`match-box ${why ? 'drop-invalid' : ''}`}>
+                            <div className="vs">
+                              <DropZone zone={`${rd.round}:${i}:A`} group={group} className="team-zone a" label={`Round ${rd.round} team A`}>
+                                {m.teamA.map((u: string) => <DragPill key={u} item={u} zone={`${rd.round}:${i}:A`} group={group} disabled={!edit} label={n(u)} />)}
+                              </DropZone>
+                              <span className="label">vs</span>
+                              <DropZone zone={`${rd.round}:${i}:B`} group={group} className="team-zone b" label={`Round ${rd.round} team B`}>
+                                {m.teamB.map((u: string) => <DragPill key={u} item={u} zone={`${rd.round}:${i}:B`} group={group} disabled={!edit} label={n(u)} />)}
+                              </DropZone>
+                            </div>
+                            <div className="row between tiny muted"><span>{m.skillA?.toFixed?.(0)}</span><span>{m.skillB?.toFixed?.(0)}</span></div>
+                            {why?.map((w: string) => <div key={w} className="issue">Not allowed: {w}</div>)}
+                          </div>
+                        );
+                      })}
+                      {(edit || rd.sitOut?.length > 0) && (
+                        <DropZone zone={`${rd.round}:sit`} group={group} className="sit-zone" label={`Round ${rd.round} sitting out`}>
+                          <span className="tiny muted">Sitting out:</span>
+                          {(rd.sitOut ?? []).map((u: string) => <DragPill key={u} item={u} zone={`${rd.round}:sit`} group={group} disabled={!edit} label={n(u)} />)}
+                        </DropZone>
+                      )}
                     </div>
-                  ))}
-                  {rd.sitOut.length > 0 && <div className="tiny muted">Sitting out: {rd.sitOut.map(n).join(', ')}</div>}
-                </div>
-              ))}
-            </div>
+                  );
+                })}
+              </div>
+            </DragBoard>
           </div>
         );
       })}
-      {plan && !confirmed && plan.pools.some((p: any) => p.result.status === 'ok') && (
-        <details style={{ marginTop: 14 }}>
-          <summary>Manual adjustment: swap two players within a round</summary>
-          <div className="form-grid" style={{ marginTop: 10 }}>
-            <Field label="Pool"><select value={swap.pool} onChange={(e) => setSwap({ ...swap, pool: Number(e.target.value), a: '', b: '' })}>{plan.pools.map((p: any) => <option key={p.poolIndex} value={p.poolIndex}>Pool {String.fromCharCode(65 + p.poolIndex)}</option>)}</select></Field>
-            <Field label="Round"><input type="number" min={1} max={plan.pools.find((p: any) => p.poolIndex === swap.pool)?.rounds ?? plan.rounds} value={swap.round} onChange={(e) => setSwap({ ...swap, round: Number(e.target.value) })} /></Field>
-            {(['a', 'b'] as const).map((k) => (
-              <Field key={k} label={k === 'a' ? 'Player' : 'Swap with'}>
-                <select value={swap[k]} onChange={(e) => setSwap({ ...swap, [k]: e.target.value })}>
-                  <option value="">Choose…</option>
-                  {plan.pools.find((p: any) => p.poolIndex === swap.pool)?.playerIds.map((u: string) => <option key={u} value={u}>{n(u)}</option>)}
-                </select>
-              </Field>
-            ))}
-          </div>
-          <p className="tiny muted">Swaps that would repeat a trio, put someone twice in a round, or worsen appearance balance are refused.</p>
-          <button className="btn small" disabled={busy || !swap.a || !swap.b} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/schedule/swap`, { body: { poolIndex: swap.pool, round: swap.round, playerA: swap.a, playerB: swap.b } }))) { toast('Swapped and re-validated'); reload(); } }}>Swap</button>
-        </details>
-      )}
     </div>
   );
 }
@@ -203,16 +241,17 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
   const reshape = async (body: Record<string, unknown>) => {
     if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/preview`, { body }))) reload();
   };
-  const moveTo = async (userId: string, to: number) => {
-    const teams = plan.teams.map((tm: any) => ({ players: tm.players.filter((u: string) => u !== userId) }));
-    teams[to].players.push(userId);
-    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams } }))) reload();
+  // Teams as dragged, shown right away while the move saves.
+  const [local, setLocal] = useState<string[][] | null>(null);
+  const teamPlayers: string[][] = local ?? plan.teams.map((tm: any) => tm.players);
+  const drop = async (r: DropResult) => {
+    const z = applyDrop(Object.fromEntries(teamPlayers.map((p, i) => [`team:${i}`, p])), r);
+    const next = teamPlayers.map((_, i) => z[`team:${i}`]);
+    setLocal(next);
+    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams: next.map((players) => ({ players })) } }))) await reload();
+    setLocal(null);
   };
-  const swapPlayers = async (u1: string, u2: string) => {
-    const teams = plan.teams.map((tm: any) => ({ players: tm.players.map((u: string) => (u === u1 ? u2 : u === u2 ? u1 : u)) }));
-    if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams } }))) reload();
-  };
-  const [pick, setPick] = useState<string | null>(null);
+  const legal = teamPlayers.every((tm) => tm.length === 3);
   const [handPick, setHandPick] = useState(false);
   return (
     <>
@@ -224,7 +263,7 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
           <label className="row small muted">Qualifiers per pool <input type="number" min={1} value={perPool} onChange={(e) => setPerPool(Number(e.target.value))} style={{ width: 70 }} /></label>
           <button className="btn small" onClick={() => preview(null, perPool)} disabled={busy}>Recalculate</button>
           <button className="btn small" onClick={() => setHandPick(true)} disabled={busy || handPick}>Hand-pick teams</button>
-          <button className="btn primary" disabled={busy || plan.teams.some((tm: any) => tm.players.length !== 3)} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/start`, { body: {} }))) { toast('Finals started!'); reload(); } }}>Start finals</button>
+          <button className="btn primary" disabled={busy || !legal} title={legal ? undefined : 'Every team needs exactly 3 players'} onClick={async () => { if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/start`, { body: {} }))) { toast('Finals started!'); reload(); } }}>Start finals</button>
         </div>
       </div>
       <ErrorBox error={error} />
@@ -256,23 +295,18 @@ function FinalsEditor({ d, names, reload }: { d: any; names: Map<string, string>
           </label>
         ))}
       </div>
-      <h4 style={{ marginTop: 14 }}>Teams ({plan.optionId === 'hand_picked' ? 'hand-picked' : FINALS_TEAM_FORMATION_LABELS[formation as 'balanced']?.toLowerCase() ?? formation}; click two players to swap them)</h4>
-      <div className="pool-grid">
-        {plan.teams.map((tm: any, i: number) => (
-          <div className="round" key={tm.key}>
-            <h4>Seed {tm.seed} · {tm.name} · skill {tm.skill.toFixed?.(0) ?? tm.skill}</h4>
-            {tm.players.map((u: string) => (
-              <span key={u} className={`player-pill ${pick === u ? 'me' : ''}`} style={{ cursor: 'pointer' }} onClick={() => { if (!pick) setPick(u); else { if (pick !== u) void swapPlayers(pick, u); setPick(null); } }}>
-                {n(u)}
-                <select aria-label={`Move ${n(u)}`} value={i} onClick={(e) => e.stopPropagation()} onChange={(e) => void moveTo(u, Number(e.target.value))}>
-                  {plan.teams.map((_: any, j: number) => <option key={j} value={j}>→{j + 1}</option>)}
-                </select>
-              </span>
-            ))}
-            {tm.players.length !== 3 && <div className="tiny" style={{ color: 'var(--red)' }}>Needs exactly 3 players</div>}
-          </div>
-        ))}
-      </div>
+      <h4 style={{ marginTop: 14 }}>Teams ({plan.optionId === 'hand_picked' ? 'hand-picked' : FINALS_TEAM_FORMATION_LABELS[formation as 'balanced']?.toLowerCase() ?? formation}; drag a name to another team to move it, or onto another name to swap)</h4>
+      <DragBoard onDrop={(r) => void drop(r)} disabled={busy}>
+        <div className="pool-grid">
+          {plan.teams.map((tm: any, i: number) => (
+            <DropZone key={tm.key} zone={`team:${i}`} className="round" invalid={teamPlayers[i].length !== 3} label={`Seed ${tm.seed}`}>
+              <h4>Seed {tm.seed} · {tm.name} · skill {tm.skill.toFixed?.(0) ?? tm.skill}</h4>
+              {teamPlayers[i].map((u: string) => <DragPill key={u} item={u} zone={`team:${i}`} label={n(u)} />)}
+              {teamPlayers[i].length !== 3 && <div className="issue">Not allowed: has {teamPlayers[i].length} players; finals teams need exactly 3.</div>}
+            </DropZone>
+          ))}
+        </div>
+      </DragBoard>
       <h4 style={{ marginTop: 14 }}>First round{bracketFormat === 'double_elim' ? ' (winners bracket)' : ''}</h4>
       <div className="small">{plan.bracket.filter((b: any) => b.round === 1).map((b: any, i: number) => {
         const tn = (k: string | null) => (k ? plan.teams.find((x: any) => x.key === k)?.name ?? k : 'bye');
@@ -292,7 +326,20 @@ function HandPickTeams({ plan, t, n, reload, close }: { plan: any; t: any; n: (u
   const [count, setCount] = useState<number>(Math.max(2, plan.teams.length));
   const [assign, setAssign] = useState<Record<string, number>>(() => Object.fromEntries(plan.teams.flatMap((tm: any, i: number) => tm.players.map((u: string) => [u, i]))));
   const teams = Array.from({ length: count }, (_, i) => everyone.map((q) => q.playerId).filter((u) => assign[u] === i));
+  const bench = everyone.map((q) => q.playerId).filter((u) => !((assign[u] ?? -1) >= 0 && assign[u] < count));
   const ready = teams.every((tm) => tm.length === 3);
+  const info = new Map(everyone.map((q) => [q.playerId, q]));
+  const drop = (r: DropResult) => {
+    const zones: Record<string, string[]> = { bench, ...Object.fromEntries(teams.map((tm, i) => [`team:${i}`, tm])) };
+    const z = applyDrop(zones, r);
+    const next: Record<string, number> = {};
+    teams.forEach((_, i) => z[`team:${i}`].forEach((u) => { next[u] = i; }));
+    setAssign(next);
+  };
+  const pill = (u: string, zone: string) => {
+    const q = info.get(u);
+    return <DragPill key={u} item={u} zone={zone} label={n(u)} extra={q && <span className="muted tiny">P{q.poolIndex + 1} #{q.poolRank}{qualified.has(u) ? ' ✓' : ''}</span>} />;
+  };
   const save = async () => {
     if (await run(() => api(`/api/tournaments/${t.id}/sixmans/finals/teams`, { method: 'PUT', body: { teams: teams.map((players) => ({ players })), handPicked: true } }))) {
       toast('Finals teams saved');
@@ -311,35 +358,22 @@ function HandPickTeams({ plan, t, n, reload, close }: { plan: any; t: any; n: (u
         </div>
       </div>
       <ErrorBox error={error} />
-      <p className="small muted">Put exactly 3 players on each team. Any group-stage player can be picked; team 1 is the top seed.</p>
-      <div className="pool-grid">
-        {teams.map((tm, i) => (
-          <div className="round" key={i}>
-            <h4>Team {i + 1} (seed {i + 1})</h4>
-            {tm.map((u) => <span key={u} className="player-pill">{n(u)}</span>)}
-            {tm.length !== 3 && <div className="tiny" style={{ color: 'var(--red)' }}>{tm.length}/3 players</div>}
-          </div>
-        ))}
-      </div>
-      <div className="table-wrap" style={{ marginTop: 10 }}>
-        <table className="table">
-          <thead><tr><th>Player</th><th>Group result</th><th>Team</th></tr></thead>
-          <tbody>
-            {everyone.map((q) => (
-              <tr key={q.playerId}>
-                <td>{n(q.playerId)}</td>
-                <td className="small">P{q.poolIndex + 1} #{q.poolRank}{qualified.has(q.playerId) ? ' · qualified' : ''}</td>
-                <td>
-                  <select aria-label={`Team for ${n(q.playerId)}`} value={(assign[q.playerId] ?? -1) < count ? assign[q.playerId] ?? -1 : -1} onChange={(e) => setAssign({ ...assign, [q.playerId]: Number(e.target.value) })}>
-                    <option value={-1}>Not playing</option>
-                    {teams.map((_, j) => <option key={j} value={j}>Team {j + 1}</option>)}
-                  </select>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <p className="small muted">Drag exactly 3 players onto each team. Any group-stage player can be picked; team 1 is the top seed. ✓ marks players who qualified.</p>
+      <DragBoard onDrop={drop} disabled={busy}>
+        <div className="pool-grid">
+          {teams.map((tm, i) => (
+            <DropZone key={i} zone={`team:${i}`} className="round" invalid={tm.length !== 3} label={`Team ${i + 1}`}>
+              <h4>Team {i + 1} (seed {i + 1})</h4>
+              {tm.map((u) => pill(u, `team:${i}`))}
+              {tm.length !== 3 && <div className="issue">{tm.length}/3 players</div>}
+            </DropZone>
+          ))}
+        </div>
+        <DropZone zone="bench" className="round bench-zone" label="Not playing">
+          <h4>Not playing ({bench.length})</h4>
+          {bench.map((u) => pill(u, 'bench'))}
+        </DropZone>
+      </DragBoard>
     </div>
   );
 }
