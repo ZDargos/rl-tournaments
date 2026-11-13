@@ -13,3 +13,6 @@ e2e/artifacts/
 *.log
 .DS_Store
 e2e/*.png
+
+# taste-skill (design-taste-frontend) build/checker state
+.taste-skill/
