@@ -83,11 +83,11 @@ function picksOf(ctx: AppContext, pollId: number, userId: string): number[] {
 const teamMode = (t: LoadedTournament) => t.cfg.registrationMode === 'team' && t.cfg.teamSize > 1;
 const bump = (ctx: AppContext, tid: number) => ctx.db.prepare('UPDATE tournaments SET version = version + 1 WHERE id = ?').run(tid);
 
-/** What the website shows. Voters' names are for organizers only. */
+/** What the website shows. Vote counts and voters' names are for organizers only: players see only their own picks. */
 export function pollView(ctx: AppContext, t: LoadedTournament, viewerId: string | null, canManage: boolean) {
   const p = latestPoll(ctx, t.id);
   if (!p) return null;
-  const c = counts(ctx, p);
+  const c = canManage ? counts(ctx, p) : [];
   const mine = viewerId ? new Set(picksOf(ctx, p.id, viewerId)) : new Set<number>();
   let voters: { userId: string; name: string; options: number[] }[] | undefined;
   if (canManage) {
@@ -100,8 +100,8 @@ export function pollView(ctx: AppContext, t: LoadedTournament, viewerId: string 
   return {
     id: p.id, status: p.status, closesAt: p.closes_at, winner: p.winner, tie: !!p.tie, closedAt: p.closed_at,
     // In time order; `index` is what votes and `winner` refer to.
-    options: byTime(optionsOf(p)).map((i) => ({ index: i, at: optionsOf(p)[i], votes: c[i], mine: mine.has(i) })),
-    voterCount: (ctx.db.prepare('SELECT COUNT(DISTINCT user_id) c FROM start_poll_votes WHERE poll_id = ?').get(p.id) as { c: number }).c,
+    options: byTime(optionsOf(p)).map((i) => ({ index: i, at: optionsOf(p)[i], mine: mine.has(i), ...(canManage ? { votes: c[i] } : {}) })),
+    voterCount: canManage ? (ctx.db.prepare('SELECT COUNT(DISTINCT user_id) c FROM start_poll_votes WHERE poll_id = ?').get(p.id) as { c: number }).c : undefined,
     cardPosted: p.card_status === 'posted', voters,
   };
 }
@@ -262,7 +262,8 @@ async function writeVotes(ctx: AppContext, userId: string, p: PollRow, next: (cu
     return picksOf(ctx, p.id, userId);
   });
   ctx.kick(t.id);
-  return { picks, options: optionsOf(p), counts: counts(ctx, p) };
+  // No counts here: players must not see the tally (organizers see it on the website).
+  return { picks, options: optionsOf(p) };
 }
 
 export async function closePollNow(ctx: AppContext, actorId: string, tournamentId: number, source: Source) {
@@ -415,16 +416,16 @@ function byTime(options: string[]): number[] {
   return options.map((_, i) => i).sort((a, b) => Date.parse(options[a]) - Date.parse(options[b]));
 }
 
+// The card is public, so it never shows vote counts; organizers see them on the website.
 function renderCard(ctx: AppContext, t: LoadedTournament, p: PollRow): MessageContent {
   const options = optionsOf(p);
-  const c = counts(ctx, p);
   const order = byTime(options);
   const head = `🗳️ **When should ${escapeDiscord(t.name)} start?**`;
   // Angle brackets stop Discord from adding a big link preview under the card.
   const link = `Details and sign-up: <${ctx.env.WEB_URL}/#/t/${t.id}>`;
   const lines = order.map((i, n) => {
     const won = p.status === 'closed' && p.winner === i;
-    return `${won ? '🏆' : numberMark(n + 1)} ${discordTime(options[i], 'F')} · **${c[i]}** vote${c[i] === 1 ? '' : 's'}`;
+    return `${won ? '🏆' : numberMark(n + 1)} ${discordTime(options[i], 'F')}`;
   });
   if (p.status === 'open') {
     return {

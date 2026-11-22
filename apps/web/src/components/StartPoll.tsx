@@ -147,7 +147,7 @@ export function StartPollVote({ d, reload }: { d: any; reload: () => void }) {
           <label key={o.index} className="row" style={{ gap: 10, flexWrap: 'nowrap', cursor: me ? 'pointer' : 'default', padding: '8px 10px', borderRadius: 'var(--radius-control)', border: '1px solid var(--line)', background: o.mine ? 'rgb(59 139 255 / 0.1)' : 'var(--color-pitch)' }}>
             <input type="checkbox" checked={o.mine} disabled={!me || busy} onChange={() => void toggle(o.index)} />
             <span style={{ flex: 1 }}>{fmtDate(o.at)}</span>
-            <span className="muted small">{o.votes} vote{o.votes === 1 ? '' : 's'}</span>
+            {typeof o.votes === 'number' && <span className="muted small">{o.votes} vote{o.votes === 1 ? '' : 's'}</span>}
           </label>
         ))}
       </div>

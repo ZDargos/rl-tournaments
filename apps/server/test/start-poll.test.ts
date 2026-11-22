@@ -50,7 +50,14 @@ describe('start time vote', () => {
     await s.settle();
     const view = (await detail()).startPoll;
     expect(view.options.map((o: any) => o.votes)).toEqual([0, 3, 2]);
-    expect(s.discord.messages.get(card.id!)!.content).toMatch(/\*\*3\*\* votes/);
+    // Counts are for organizers only: not on the public card, not in a player's view of the tournament.
+    expect(s.discord.messages.get(card.id!)!.content).not.toMatch(/\*\*\d+\*\* votes?/);
+    const playerView = ok(await ps[2].get(`/api/tournaments/${tid}`)).body.startPoll;
+    expect(playerView.options.map((o: any) => o.mine)).toEqual([false, true, true]);
+    expect(playerView.options.every((o: any) => !('votes' in o))).toBe(true);
+    expect(playerView.voterCount).toBeUndefined();
+    expect(playerView.voters).toBeUndefined();
+    expect(JSON.stringify(playerView)).not.toMatch(/"votes"/);
 
     // The deadline passes: #2 wins.
     s.clock.advance(24 * 60 + 1);
